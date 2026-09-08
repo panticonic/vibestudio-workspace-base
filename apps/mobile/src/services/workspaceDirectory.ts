@@ -1,4 +1,7 @@
-import { submitWorkspaceCreation, readWorkspaceCreationSubmission } from "@vibestudio/service-schemas/clients/workspaceCreationClient";
+import {
+  submitWorkspaceCreation,
+  readWorkspaceCreationSubmission,
+} from "@vibestudio/service-schemas/clients/workspaceCreationClient";
 import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/types";
 import { clearWorkspaceCookies } from "./workspaceBrowserProfile";
 import { extensionsMethods } from "@vibestudio/service-schemas/extensions";
@@ -89,7 +92,10 @@ export class MobileWorkspaceDirectory {
   personalWorkspaceId = "";
   systemWorkspaceId = "";
   error: string | null = null;
-  workspaceCreation: { template?: TemplateExactPin; sourceUrl?: string } | null = null;
+  workspaceCreation: {
+    template?: TemplateExactPin;
+    sourceUrl?: string;
+  } | null = null;
   /** Account metadata for unopened workspaces; live controllers refine connected queues. */
   readonly pendingApprovalCounts = new Map<string, number>();
   approvalPresentation = createApprovalPresentationState();
@@ -548,7 +554,9 @@ export class MobileWorkspaceDirectory {
     await this.open(workspaceId);
   }
 
-  requestWorkspaceCreation(source: { template?: TemplateExactPin; sourceUrl?: string } = {}): void {
+  requestWorkspaceCreation(
+    source: { template?: TemplateExactPin; sourceUrl?: string } = {},
+  ): void {
     this.workspaceCreation = source;
     this.changed();
   }
@@ -558,7 +566,9 @@ export class MobileWorkspaceDirectory {
     this.changed();
   }
 
-  async inspectWorkspaceTemplate(locator: import("@vibestudio/service-schemas/templates").TemplateLocator) {
+  async inspectWorkspaceTemplate(
+    locator: import("@vibestudio/service-schemas/templates").TemplateLocator,
+  ) {
     const system = await this.open(this.systemWorkspaceId);
     const extensions = createTypedServiceClient(
       "extensions",
@@ -574,14 +584,14 @@ export class MobileWorkspaceDirectory {
     return templates.inspect(locator);
   }
 
-  async listWorkspaceTemplateCandidates() {
-    return this.hubControl.listTemplateCandidates();
-  }
-
   async pendingWorkspaceCreation() {
     const profile = await this.hubControl.getProfile(undefined);
     if (!profile) throw new Error("The authenticated account is unavailable.");
-    return readWorkspaceCreationSubmission(await getNativeAppStorage().getItem(`workspace-creation:${profile.userId}`));
+    return readWorkspaceCreationSubmission(
+      await getNativeAppStorage().getItem(
+        `workspace-creation:${profile.userId}`,
+      ),
+    );
   }
 
   async createWorkspace(
@@ -589,17 +599,25 @@ export class MobileWorkspaceDirectory {
     rootTemplate?: TemplateExactPin,
   ): Promise<WorkspaceCreationReceipt> {
     const profile = await this.hubControl.getProfile(undefined);
-    if (!profile) throw new Error("The authenticated account is unavailable; workspace creation was not submitted.");
+    if (!profile)
+      throw new Error(
+        "The authenticated account is unavailable; workspace creation was not submitted.",
+      );
     const storage = getNativeAppStorage();
-    const receipt = await submitWorkspaceCreation(this.hubControl, {
-      workspace: name, ...(rootTemplate ? { rootTemplate } : {}),
-    }, {
-      key: `workspace-creation:${profile.userId}`,
-      getItem: key => storage.getItem(key),
-      setItem: (key, value) => storage.setItem(key, value),
-      removeItem: key => storage.removeItem(key),
-      newOperationId: () => crypto.randomUUID(),
-    });
+    const receipt = await submitWorkspaceCreation(
+      this.hubControl,
+      {
+        workspace: name,
+        ...(rootTemplate ? { rootTemplate } : {}),
+      },
+      {
+        key: `workspace-creation:${profile.userId}`,
+        getItem: (key) => storage.getItem(key),
+        setItem: (key, value) => storage.setItem(key, value),
+        removeItem: (key) => storage.removeItem(key),
+        newOperationId: () => crypto.randomUUID(),
+      },
+    );
     await this.refresh();
     return receipt;
   }
