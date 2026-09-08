@@ -58,6 +58,7 @@ import {
   formatAccount,
   formatInjection,
   getApprovalAttribution,
+  getApprovalIdentityDetails,
   getApprovalCopy,
   getApprovalOperationKindLabel,
   getRecommendedStandardDecision,
@@ -1708,16 +1709,14 @@ function ApprovalDetails({
               />
             </>
           ) : null}
-          <Detail
-            icon={<GlobeIcon />}
-            label="Requester repo"
-            value={<InlineCode>{approval.repoPath}</InlineCode>}
-          />
-          <Detail
-            icon={<LockClosedIcon />}
-            label="Requester version"
-            value={<IdCode value={approval.effectiveVersion} />}
-          />
+          {getApprovalIdentityDetails(approval).map(({ label, value }) => (
+            <Detail
+              key={label}
+              icon={<GlobeIcon />}
+              label={label}
+              value={<InlineCode>{value}</InlineCode>}
+            />
+          ))}
         </Flex>
       </details>
     </>

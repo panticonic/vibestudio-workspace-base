@@ -55,6 +55,7 @@ import {
   formatCredentialInputAudienceSummary,
   formatInjection,
   getApprovalAttribution,
+  getApprovalIdentityDetails,
   getApprovalCallerPresentation,
   getApprovalCopy,
   getApprovalOperationKindLabel,
@@ -1442,18 +1443,15 @@ function ApprovalDetails({
               />
             </>
           ) : null}
-          <DetailRow
-            icon={Globe}
-            label="Requester repo"
-            value={approval.repoPath}
-            code
-          />
-          <DetailRow
-            icon={Lock}
-            label="Requester version"
-            value={approval.effectiveVersion}
-            code
-          />
+          {getApprovalIdentityDetails(approval).map(({ label, value }) => (
+            <DetailRow
+              key={label}
+              icon={Globe}
+              label={label}
+              value={value}
+              code
+            />
+          ))}
           {approval.kind === "credential" ? (
             <CredentialDetails approval={approval} />
           ) : approval.kind === "client-config" ? (
