@@ -1,3 +1,4 @@
+import type { NativeWebsiteRequest } from "../services/websiteDocumentHost";
 import type { BrowserPermissionRequester } from "../services/workspaceBrowserPermission";
 import type { WebsiteNotificationHost } from "../services/workspaceWebsiteNotifications";
 import { memo, useCallback } from "react";
@@ -38,6 +39,10 @@ export interface LoadedPanelWebViewProps {
     connectionId: string,
     observation: PanelPageObservation,
   ) => void;
+  onWebsiteRequest?: (
+    panelId: string,
+    request: NativeWebsiteRequest,
+  ) => Promise<unknown>;
   onBridgeCall: (
     panelId: string,
     method: string,
@@ -69,6 +74,7 @@ function LoadedPanelWebViewImpl({
   onTitleChange,
   onBootObservation,
   onBridgeCall,
+  onWebsiteRequest,
   onUnmount,
 }: LoadedPanelWebViewProps) {
   const handleRef = useCallback(
@@ -115,6 +121,7 @@ function LoadedPanelWebViewImpl({
           onTitleChange={onTitleChange}
           onBootObservation={onBootObservation}
           onBridgeCall={onBridgeCall}
+          onWebsiteRequest={onWebsiteRequest}
           onUnmount={onUnmount}
           diagnosticsEnabled={diagnosticsEnabled}
           colors={{

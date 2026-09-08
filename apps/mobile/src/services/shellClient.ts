@@ -1,4 +1,9 @@
 import {
+  WebsiteDocumentHost,
+  type NativeWebsiteRequest,
+} from "./websiteDocumentHost";
+import { runtimeConnectionInfoFromBootstrap } from "@vibestudio/rpc";
+import {
   mobileShellSurface,
   type MobileShellSurface,
 } from "./mobileShellSurfaces";
@@ -291,6 +296,7 @@ export class MobileHostTargetApprovalRequiredError extends Error {
 }
 
 class MobilePanels implements PanelHost {
+  private websiteHost: WebsiteDocumentHost | null = null;
   private panelManager: PanelManager | null = null;
   private registryInstance: PanelRegistry | null = null;
   private bridgeAdapterInstance: ReturnType<typeof createBridgeAdapter> | null =
@@ -350,8 +356,7 @@ class MobilePanels implements PanelHost {
         ),
       release: (runtimeEntityId, connectionId) =>
         this.panelRuntime.release(runtimeEntityId, connectionId),
-      changed: (panelId) =>
-        this.bridgeAdapterInstance?.closePanelSession(panelId),
+      changed: (panelId) => this.resetBridgeSessionForReload(panelId),
       failed: (error) =>
         console.warn("[MobilePanels] Failed to retire panel lease", error),
     });
@@ -403,10 +408,42 @@ class MobilePanels implements PanelHost {
           openShellSurface: this.deps.openShellSurface,
         },
         deliverToPanel: (panelId, envelope) =>
-          this.deliverToPanel(panelId, envelope),
+          this.deliverToPanel(
+            panelId,
+            this.websiteHost?.delivery(panelId, envelope) ?? envelope,
+          ),
         getPanelLease: (panelId) => this.runtimeLeases.get(panelId),
       });
     }
+    this.websiteHost ??= new WebsiteDocumentHost({
+      runtimeId: (panelId) => {
+        const lease = this.runtimeLeases.get(panelId);
+        if (!lease)
+          throw new Error("Website panel has no active presentation lease");
+        return lease.runtimeEntityId;
+      },
+      bootstrap: async (panelId) => {
+        const lease = this.runtimeLeases.get(panelId);
+        if (!lease)
+          throw new Error("Website panel has no active presentation lease");
+        return runtimeConnectionInfoFromBootstrap(
+          await this.getPanelInit(panelId),
+          lease.runtimeEntityId,
+        );
+      },
+      hosting: (method, input) =>
+        this.deps.transport.call("main", `websiteHosting.${method}`, [input]),
+      relay: (panelId, method, args) =>
+        this.bridgeAdapterInstance!.relay(panelId, method, args),
+      closeRelay: (panelId) =>
+        this.bridgeAdapterInstance?.closePanelSession(panelId),
+      disconnected: (panelId, documentId) =>
+        this.deliverToPanel(panelId, {
+          __vibestudioWebsiteDocument: documentId,
+          disconnected: true,
+        }),
+      executionId: () => crypto.randomUUID(),
+    });
     const initialTheme =
       Appearance.getColorScheme() === "light" ? "light" : "dark";
     this.panelManager.setCurrentTheme(initialTheme);
@@ -896,6 +933,11 @@ class MobilePanels implements PanelHost {
    * previous document's recovered logical session or its in-flight streams.
    */
   resetBridgeSessionForReload(panelId: string): void {
+    void this.websiteHost
+      ?.retire(panelId)
+      .catch((error) =>
+        console.warn("[MobilePanels] Failed to retire website document", error),
+      );
     this.bridgeAdapterInstance?.closePanelSession(panelId);
   }
   syncRetainedRuntimeOwners(
@@ -920,8 +962,12 @@ class MobilePanels implements PanelHost {
     );
   }
   async unload(panelId: string): Promise<void> {
-    this.bridgeAdapterInstance?.closePanelSession(panelId);
-    await this.runtimeLeases.retire(panelId);
+    try {
+      await this.websiteHost?.retire(panelId);
+    } finally {
+      this.bridgeAdapterInstance?.closePanelSession(panelId);
+      await this.runtimeLeases.retire(panelId);
+    }
   }
   async reportView(
     runtimeEntityId: PanelEntityId,
@@ -997,6 +1043,21 @@ class MobilePanels implements PanelHost {
     this.registry.applyRuntimeLeaseSnapshot(snapshot);
     await this.syncTrackedRuntimeLeases(snapshot, owners);
   }
+  async handleWebsiteRequest(
+    panelId: string,
+    request: NativeWebsiteRequest,
+  ): Promise<unknown> {
+    if (!this.websiteHost) throw new Error("Website hosting is unavailable");
+    return this.websiteHost.request(panelId, request);
+  }
+  async handleWebsiteConnectionChanged(change: {
+    runtimeId: string;
+    documentId: string;
+    connected: boolean;
+  }) {
+    await this.websiteHost?.changed(change);
+  }
+
   async handleBridgeCall(
     panelId: string,
     method: string,
@@ -1127,8 +1188,14 @@ export class ShellClient {
   readonly hubControl: ReturnType<typeof createHubControlClient>;
   readonly events: EventsClient;
   readonly websiteConnections = createTypedServiceClient(
-    "websiteHosting", { list: websiteHostingMethods.list },
-    (service, method, args) => this.transport.call("main", `${service}.${method}`, args),
+    "websiteHosting",
+    {
+      list: websiteHostingMethods.list,
+      end: websiteHostingMethods.end,
+      forget: websiteHostingMethods.forget,
+    },
+    (service, method, args) =>
+      this.transport.call("main", `${service}.${method}`, args),
   );
   readonly shellApproval: ShellApprovalClient;
   /** Content-addressed reads used by approval diff review and file inspection. */

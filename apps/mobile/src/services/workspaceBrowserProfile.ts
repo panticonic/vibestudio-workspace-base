@@ -1,3 +1,4 @@
+import type { NativeWebsiteRequest } from "./websiteDocumentHost";
 import {
   Platform,
   NativeModules,
@@ -33,6 +34,7 @@ export function workspaceWebViewConfig(
   onWorkspaceWebsiteNotification?: (event: {
     nativeEvent: NativeWebsiteNotificationRequest;
   }) => void,
+  onWorkspaceRequest?: (event: { nativeEvent: NativeWebsiteRequest }) => void,
 ): NonNullable<WebViewProps["nativeConfig"]> {
   const native = UIManager.getViewManagerConfig(COMPONENT) as {
     Constants?: { profilesSupported?: boolean };
@@ -50,6 +52,7 @@ export function workspaceWebViewConfig(
       requireNativeComponent<NativeProps>(COMPONENT)),
     props: {
       workspaceProfile: scope,
+      ...(onWorkspaceRequest ? { onWorkspaceRequest } : {}),
       ...(onWorkspacePermission ? { onWorkspacePermission } : {}),
       ...(onWorkspaceWebsiteNotification
         ? { onWorkspaceWebsiteNotification }

@@ -1,3 +1,4 @@
+import type { NativeWebsiteRequest } from "../services/websiteDocumentHost";
 import { observeWebsiteConnections } from "@vibestudio/shell-core/websiteConnections";
 import { websiteConnectionSnapshotAtom } from "../state/shellClientAtom";
 import type { MobileShellSurface } from "../services/mobileShellSurfaces";
@@ -237,16 +238,29 @@ export function MainScreen({
   }, [navigation, persistentNavigation, workspaceVisible]);
   const shellClient = useAtomValue(shellClientAtom);
   const setWebsiteConnections = useSetAtom(websiteConnectionSnapshotAtom);
+  const websiteConnectionSnapshot = useAtomValue(websiteConnectionSnapshotAtom);
   useEffect(() => {
     setWebsiteConnections({ owner: shellClient, entries: new Map() });
     if (!shellClient) return;
     return observeWebsiteConnections({
       list: () => shellClient.websiteConnections.list(),
-      listen: changed => shellClient.events.on("website:connection-changed", changed),
-      subscribe: () => shellClient.events.subscribe("website:connection-changed"),
-      unsubscribe: () => shellClient.events.unsubscribe("website:connection-changed"),
-      changed: entries => setWebsiteConnections({ owner: shellClient, entries }),
-      error: error => console.warn("[MainScreen] Website connection inventory failed", error),
+      listen: (changed) =>
+        shellClient.events.on("website:connection-changed", (event) => {
+          changed(event);
+          void shellClient.panels
+            .handleWebsiteConnectionChanged(event)
+            .catch((error) =>
+              console.warn("[MainScreen] Website disconnect failed", error),
+            );
+        }),
+      subscribe: () =>
+        shellClient.events.subscribe("website:connection-changed"),
+      unsubscribe: () =>
+        shellClient.events.unsubscribe("website:connection-changed"),
+      changed: (entries) =>
+        setWebsiteConnections({ owner: shellClient, entries }),
+      error: (error) =>
+        console.warn("[MainScreen] Website connection inventory failed", error),
     });
   }, [shellClient, setWebsiteConnections]);
   const panelTreeRevision = useAtomValue(panelTreeRevisionAtom);
@@ -1454,10 +1468,29 @@ export function MainScreen({
         shellClient.hostCommands.get(panelId),
       );
       const isPinned = pinnedPanelIds.has(panelId);
+      const website =
+        websiteConnectionSnapshot.owner === shellClient
+          ? websiteConnectionSnapshot.entries.get(panelId)
+          : undefined;
       showActionSheet({
         title: panel?.title ?? "Panel",
         subtitle: chrome?.editableAddress,
         items: [
+          ...(website
+            ? [
+                {
+                  id: "disconnect-website",
+                  label: "Disconnect website",
+                  description: "Stop this page’s workspace access.",
+                },
+                {
+                  id: "forget-website",
+                  label: "Forget website access",
+                  description:
+                    "Remove saved permissions for this site in this workspace and disconnect its pages.",
+                },
+              ]
+            : []),
           ...contributedCommands.map((command) => ({
             ...command,
             icon: HostCommandIcon,
@@ -1480,6 +1513,27 @@ export function MainScreen({
           }),
         ],
         onSelect: (id) => {
+          if (
+            website &&
+            (id === "disconnect-website" || id === "forget-website")
+          ) {
+            const input = {
+              runtimeId: website.runtimeId,
+              documentId: website.documentId,
+            };
+            void (
+              id === "forget-website"
+                ? shellClient.websiteConnections.forget(input)
+                : shellClient.websiteConnections.end(input)
+            ).catch((error) =>
+              pushToast({
+                title: "Website access could not be updated",
+                message: String(error),
+                tone: "warning",
+              }),
+            );
+            return;
+          }
           const commandId = contributedHostCommandId(id);
           if (!commandId) {
             performPanelCommand(id as PanelCommandId, panelId);
@@ -1507,6 +1561,7 @@ export function MainScreen({
       pushToast,
       shellClient,
       showActionSheet,
+      websiteConnectionSnapshot,
     ],
   );
   // ---- Command sheet + quickfire sheet (quickfire-overlay-spec §7) ---------
@@ -2313,6 +2368,13 @@ export function MainScreen({
     },
     [recordMobileBrowserNavigation, shellClient],
   );
+  const handleWebsiteRequest = useCallback(
+    async (panelId: string, request: NativeWebsiteRequest) => {
+      if (!shellClient) throw new Error("Shell client not available");
+      return shellClient.panels.handleWebsiteRequest(panelId, request);
+    },
+    [shellClient],
+  );
   const handleBridgeCall = useCallback(
     async (panelId: string, method: string, args: unknown[]) => {
       if (!shellClient) throw new Error("Shell client not available");
@@ -2706,6 +2768,7 @@ export function MainScreen({
               onTitleChange={handlePanelTitleChange}
               onBootObservation={handlePanelBootObservation}
               onBridgeCall={handleBridgeCall}
+              onWebsiteRequest={handleWebsiteRequest}
               onUnmount={handleWebViewUnmount}
             />
           ))}

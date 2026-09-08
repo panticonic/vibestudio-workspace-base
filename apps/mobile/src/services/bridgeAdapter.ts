@@ -69,6 +69,8 @@ export function createBridgeAdapter(deps: {
   // events and stream frames demux straight back to it with no shared-session
   // ambiguity, and all RpcMessage types relay without per-type handling.
   const panelSessions = new Map<string, Promise<PanelSessionEntry>>();
+  const relayEpochs = new Map<string, number>();
+  const epochOf = (panelId: string) => relayEpochs.get(panelId) ?? 0;
 
   function requirePanelLease(panelId: string): PanelLease {
     const lease = deps.getPanelLease(panelId);
@@ -126,11 +128,18 @@ export function createBridgeAdapter(deps: {
     panelId: string,
     lease: PanelLease,
   ): Promise<PanelSessionEntry> {
+    const epoch = epochOf(panelId);
     const session = await deps.transport.openPanelSession(
       lease.runtimeEntityId,
       lease.connectionId,
     );
-    session.onMessage((envelope) => deps.deliverToPanel(panelId, envelope));
+    if (epoch !== epochOf(panelId)) {
+      session.close();
+      throw new Error("Panel document was retired");
+    }
+    session.onMessage((envelope) => {
+      if (epoch === epochOf(panelId)) deps.deliverToPanel(panelId, envelope);
+    });
     return { session, leaseKey: panelLeaseKey(lease) };
   }
 
@@ -144,6 +153,7 @@ export function createBridgeAdapter(deps: {
   const streamRelays = new Map<string, BridgeStreamRelay>();
 
   function closePanelSession(panelId: string): void {
+    relayEpochs.set(panelId, epochOf(panelId) + 1);
     const relay = streamRelays.get(panelId);
     if (relay) {
       streamRelays.delete(panelId);
@@ -158,10 +168,13 @@ export function createBridgeAdapter(deps: {
   function ensureStreamRelay(panelId: string): BridgeStreamRelay {
     const existing = streamRelays.get(panelId);
     if (existing) return existing;
+    const epoch = epochOf(panelId);
     const relay = createBridgeStreamRelay({
       chunkFormat: "base64",
       openStream: async (envelope, signal, body) => {
         const session = await ensurePanelSession(panelId);
+        if (epoch !== epochOf(panelId))
+          throw new Error("Panel document was retired");
         const lease = requirePanelLease(panelId);
         if (typeof session.streamReadable !== "function") {
           throw new Error(
@@ -178,8 +191,10 @@ export function createBridgeAdapter(deps: {
           body,
         );
       },
-      sendToPanel: (msg) =>
-        deps.deliverToPanel(panelId, { __vibestudioBridgeStream: true, msg }),
+      sendToPanel: (msg) => {
+        if (epoch === epochOf(panelId))
+          deps.deliverToPanel(panelId, { __vibestudioBridgeStream: true, msg });
+      },
     });
     streamRelays.set(panelId, relay);
     return relay;
@@ -189,7 +204,10 @@ export function createBridgeAdapter(deps: {
     panelId: string,
     envelope: RpcEnvelope,
   ): Promise<void> {
+    const epoch = epochOf(panelId);
     const session = await ensurePanelSession(panelId);
+    if (epoch !== epochOf(panelId))
+      throw new Error("Panel document was retired");
     const lease = requirePanelLease(panelId);
     await session.send(
       stampEnvelopeCaller(envelope, {
@@ -317,7 +335,50 @@ export function createBridgeAdapter(deps: {
     return true;
   }
 
+  // This is the shared data transport. It has no native chrome command dispatch.
+  async function relay(
+    panelId: string,
+    method: string,
+    args: unknown[],
+  ): Promise<unknown> {
+    switch (method) {
+      case "postEnvelope":
+        await sendPanelEnvelope(panelId, args[0] as RpcEnvelope);
+        return;
+      // §1.6 upload hop — a panel's streaming request body crosses the
+      // postMessage bridge as sequenced base64 chunk messages. Rejections
+      // propagate to the panel's awaited callHost (fail-loud, no silent drop).
+      case "streamOpen": {
+        const [msg] = args as [BridgeStreamOpen];
+        ensureStreamRelay(panelId).open(msg);
+        return;
+      }
+      case "streamBodyChunk": {
+        const [msg] = args as [BridgeBodyChunk];
+        const relay = streamRelays.get(panelId);
+        if (!relay)
+          throw new Error(`No open bridge upload stream for panel ${panelId}`);
+        // The returned promise IS the backpressure: it resolves (→ the panel's
+        // pending callHost ack) once the reassembly buffer is under the watermark.
+        return relay.pushBodyChunk(msg);
+      }
+      case "streamAbort": {
+        const [opId] = args as [string];
+        streamRelays.get(panelId)?.abort(String(opId));
+        return;
+      }
+      case "streamAck": {
+        const [opId, seq] = args as [string, number];
+        streamRelays.get(panelId)?.ack(String(opId), Number(seq));
+        return;
+      }
+      default:
+        throw new Error(`Unknown RPC bridge method: ${method}`);
+    }
+  }
+
   return {
+    relay,
     closePanelSession,
     async handle(
       panelId: string,
@@ -401,35 +462,11 @@ export function createBridgeAdapter(deps: {
           await sendPanelEnvelope(panelId, envelope);
           return;
         }
-        // §1.6 upload hop — a panel's streaming request body crosses the
-        // postMessage bridge as sequenced base64 chunk messages. Rejections
-        // propagate to the panel's awaited callHost (fail-loud, no silent drop).
-        case "streamOpen": {
-          const [msg] = args as [BridgeStreamOpen];
-          ensureStreamRelay(panelId).open(msg);
-          return;
-        }
-        case "streamBodyChunk": {
-          const [msg] = args as [BridgeBodyChunk];
-          const relay = streamRelays.get(panelId);
-          if (!relay)
-            throw new Error(
-              `No open bridge upload stream for panel ${panelId}`,
-            );
-          // The returned promise IS the backpressure: it resolves (→ the panel's
-          // pending callHost ack) once the reassembly buffer is under the watermark.
-          return relay.pushBodyChunk(msg);
-        }
-        case "streamAbort": {
-          const [opId] = args as [string];
-          streamRelays.get(panelId)?.abort(String(opId));
-          return;
-        }
-        case "streamAck": {
-          const [opId, seq] = args as [string, number];
-          streamRelays.get(panelId)?.ack(String(opId), Number(seq));
-          return;
-        }
+        case "streamOpen":
+        case "streamBodyChunk":
+        case "streamAbort":
+        case "streamAck":
+          return relay(panelId, method, args);
         default:
           throw new Error(`Unknown mobile bridge method: ${method}`);
       }

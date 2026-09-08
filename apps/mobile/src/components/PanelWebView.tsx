@@ -1,3 +1,7 @@
+import { findNodeHandle } from "react-native";
+import { UIManager } from "react-native";
+import type { NativeWebsiteRequest } from "../services/websiteDocumentHost";
+import { WEBSITE_PROVIDER_SCRIPT } from "../services/websiteProviderScript";
 import React, {
   useRef,
   useState,
@@ -113,6 +117,10 @@ export interface PanelWebViewProps {
     connectionId: string,
     observation: PanelPageObservation,
   ) => void;
+  onWebsiteRequest?: (
+    panelId: string,
+    request: NativeWebsiteRequest,
+  ) => Promise<unknown>;
   onBridgeCall?: (
     panelId: string,
     method: string,
@@ -574,7 +582,10 @@ function hostAuthorityOf(url: string): string | null {
   return match?.[1]?.toLowerCase() ?? null;
 }
 
-function panelDocumentIncarnationKey(panelId: string, panelInit: unknown): string {
+function panelDocumentIncarnationKey(
+  panelId: string,
+  panelInit: unknown,
+): string {
   if (!panelInit || typeof panelInit !== "object" || Array.isArray(panelInit))
     return panelId;
   const init = panelInit as Record<string, unknown>;
@@ -606,6 +617,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       onTitleChange,
       onBootObservation,
       onBridgeCall,
+      onWebsiteRequest,
       onUnmount,
       diagnosticsEnabled = false,
       colors,
@@ -660,14 +672,53 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       },
       [],
     );
+    const onNativeWorkspaceRequest = useCallback(
+      async (event: { nativeEvent: NativeWebsiteRequest }) => {
+        if (managed || !onWebsiteRequest) return;
+        const request = event.nativeEvent;
+        try {
+          const result = await onWebsiteRequest(panelId, request);
+          UIManager.dispatchViewManagerCommand(
+            request.target,
+            "resolveWorkspaceRequest",
+            [
+              request.documentId,
+              request.requestId,
+              true,
+              JSON.stringify(result ?? null),
+            ],
+          );
+        } catch (error) {
+          UIManager.dispatchViewManagerCommand(
+            request.target,
+            "resolveWorkspaceRequest",
+            [
+              request.documentId,
+              request.requestId,
+              false,
+              JSON.stringify(
+                error instanceof Error ? error.message : String(error),
+              ),
+            ],
+          );
+        }
+      },
+      [managed, onWebsiteRequest, panelId],
+    );
     const nativeConfig = useMemo(
       () =>
         workspaceWebViewConfig(
           browserProfile,
           onNativeBrowserPermission,
           onNativeWebsiteNotification,
+          onNativeWorkspaceRequest,
         ),
-      [browserProfile, onNativeBrowserPermission, onNativeWebsiteNotification],
+      [
+        browserProfile,
+        onNativeBrowserPermission,
+        onNativeWebsiteNotification,
+        onNativeWorkspaceRequest,
+      ],
     );
     const initialWebsiteNotificationPermission = useMemo(() => {
       try {
@@ -806,7 +857,19 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
 
     const deliverEnvelope = useCallback(
       (envelope: unknown) => {
-        if (!managed) return;
+        if (!managed) {
+          const message = envelope as { __vibestudioWebsiteDocument?: string };
+          if (message?.__vibestudioWebsiteDocument) {
+            const target = findNodeHandle(webViewRef.current);
+            if (target)
+              UIManager.dispatchViewManagerCommand(
+                target,
+                "deliverWorkspaceMessage",
+                [message.__vibestudioWebsiteDocument, JSON.stringify(message)],
+              );
+          }
+          return;
+        }
         if (!bridgeReadyRef.current) {
           const queue = pendingEnvelopesRef.current;
           queue.push(envelope);
@@ -1568,7 +1631,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
                   panelInit,
                   diagnosticsEnabled || __DEV__,
                 )
-              : ""
+              : WEBSITE_PROVIDER_SCRIPT
           }`}
           injectedJavaScript={REFERRER_POLICY_SCRIPT}
           scalesPageToFit={false}
