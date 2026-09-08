@@ -23,8 +23,9 @@ To use an app distributed as a workspace template, follow
 [Templates](../templates/SKILL.md) to inspect its exact source and open a new
 workspace. Importing a repository here edits source inside the current workspace;
 use it for a template only when the user wants to work on that template's source.
-The workspace chooser also handles local candidates selected with
-`--template-checkout`.
+The **Add workspace** surface also accepts a local folder or URL. See
+[workspace creation](../templates/references/workspace-creation.md) for native
+folder selection, website links and development checkout options.
 
 ## Config Shape
 

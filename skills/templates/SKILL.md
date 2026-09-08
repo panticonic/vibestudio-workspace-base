@@ -16,7 +16,9 @@ and merge are explicit source operations that preserve provenance and do not
 grant authority.
 
 Use [public-contract.json](public-contract.json) for exact method shapes and
-[template authoring](references/template-authoring.md) when publishing.
+[workspace creation](references/workspace-creation.md) for folder, URL, link and
+recovery behavior, and [template authoring](references/template-authoring.md)
+when publishing.
 
 ## Add a workspace
 

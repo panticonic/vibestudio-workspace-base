@@ -23,10 +23,11 @@ uses its panel cache immediately, then reads capability-owner state. A failed
 owner read becomes an honest unknown or unavailable row without suppressing
 other capabilities.
 
-The host workspace chooser is the discovery surface for development checkouts
-selected at launch. Open it without a template pin so the host can present its
-validated exact candidates; never ask the current workspace to inspect a local
-candidate through its remote Git URL.
+**Add workspace** opens the shared creation surface for a host folder or Git
+URL. Its review is owned by the client, not an onboarding interaction command.
+See [workspace creation](../templates/references/workspace-creation.md) for
+website links, development checkouts and interrupted-creation recovery. Local
+sources use the host's captured snapshot; do not re-fetch unpublished pins.
 
 ## Route a selection
 

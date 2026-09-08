@@ -4,26 +4,26 @@
   "source": "extensions/templates",
   "methods": {
     "inspect": {
-      "tier": "read",
       "arguments": ["{ pin } | { url, credential? }"],
-      "returns": "{ pin, presentation?, repositories, files }"
+      "returns": "{ pin, presentation?, repositories, files }",
+      "sensitivity": "read"
     },
     "inspectAuthoring": {
-      "tier": "read",
       "arguments": ["{ name, description, parts }"],
-      "returns": "TemplateAuthoringInspection"
+      "returns": "TemplateAuthoringInspection",
+      "sensitivity": "read"
     },
     "authoringParts": {
-      "tier": "read",
       "arguments": [],
-      "returns": "{ repoPath, packageName? }[]"
+      "returns": "{ repoPath, packageName? }[]",
+      "sensitivity": "read"
     },
     "publishAuthoring": {
-      "tier": "write",
       "arguments": [
         "{ commandId, intent, expectedFingerprint, version, destination, credentialId?, creation? }"
       ],
-      "returns": "TemplatePublication"
+      "returns": "TemplatePublication",
+      "sensitivity": "write"
     }
   },
   "invariants": [
