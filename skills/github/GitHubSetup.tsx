@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
-import { Box, Button, Flex, Grid, Heading, Separator, Text, TextField } from "@radix-ui/themes";
+import {
+  Box,
+  Button,
+  Flex,
+  Grid,
+  Heading,
+  Separator,
+  Text,
+  TextField,
+} from "@radix-ui/themes";
 import { GlobeIcon, OpenInNewWindowIcon } from "@radix-ui/react-icons";
 import {
   openGitHubTokenSettings,
@@ -12,7 +21,10 @@ import {
 interface GitHubSetupProps {
   props?: Record<string, never>;
   chat: {
-    send(content: string, options?: { metadata?: Record<string, unknown> }): Promise<unknown>;
+    send(
+      content: string,
+      options?: { metadata?: Record<string, unknown> },
+    ): Promise<unknown>;
   };
 }
 
@@ -25,34 +37,48 @@ const ACCESS_CHOICES: Array<{
   {
     value: "read-only",
     title: "Look around",
-    description: "Read repositories, issues, pull requests, and Actions without changing them.",
+    description:
+      "Read repositories, issues, pull requests, and Actions without changing them.",
   },
   {
     value: "collaborate",
     title: "Work with code",
-    description: "Clone, pull, push, and collaborate on issues and pull requests.",
+    description:
+      "Clone, pull, push, and collaborate on issues and pull requests.",
     recommended: true,
   },
   {
     value: "publish",
     title: "Publish repositories",
-    description: "Create repositories, push code, and collaborate on issues and pull requests.",
+    description:
+      "Create repositories, push code, and collaborate on issues and pull requests.",
+  },
+  {
+    value: "publish-pages",
+    title: "Publish websites",
+    description:
+      "Create a repository, push website source, and configure GitHub Pages publication. Site visibility is reviewed separately.",
   },
   {
     value: "code-workflows",
     title: "Edit Actions too",
-    description: "Work with code and also change GitHub Actions workflow files.",
+    description:
+      "Work with code and also change GitHub Actions workflow files.",
   },
   {
     value: "broad",
     title: "Full GitHub access",
-    description: "Use the broadest supported repository permissions. Choose only when needed.",
+    description:
+      "Use the broadest supported repository permissions. Choose only when needed.",
   },
 ];
 
 export default function GitHubSetup({ chat }: GitHubSetupProps) {
-  const [accessLevel, setAccessLevel] = useState<GitHubAccessLevel>("collaborate");
-  const [busy, setBusy] = useState<"internal" | "external" | "save" | null>(null);
+  const [accessLevel, setAccessLevel] =
+    useState<GitHubAccessLevel>("collaborate");
+  const [busy, setBusy] = useState<"internal" | "external" | "save" | null>(
+    null,
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [connectedAs, setConnectedAs] = useState<string | null>(null);
   const [targetName, setTargetName] = useState("");
@@ -63,7 +89,10 @@ export default function GitHubSetup({ chat }: GitHubSetupProps) {
     });
   }, []);
 
-  const run = async (action: "internal" | "external" | "save", operation: () => Promise<void>) => {
+  const run = async (
+    action: "internal" | "external" | "save",
+    operation: () => Promise<void>,
+  ) => {
     setBusy(action);
     setMessage(null);
     try {
@@ -84,7 +113,7 @@ export default function GitHubSetup({ chat }: GitHubSetupProps) {
         ...(targetName.trim() ? { targetName: targetName.trim() } : {}),
       });
       setMessage(
-        "GitHub’s token page is open. Create the token there, then return here to save it."
+        "GitHub’s token page is open. Create the token there, then return here to save it.",
       );
     });
 
@@ -96,7 +125,9 @@ export default function GitHubSetup({ chat }: GitHubSetupProps) {
       });
       const verification = await verifyGitHubCredential(stored.id);
       if (!verification.valid) {
-        throw new Error(verification.error ?? "GitHub could not verify this token.");
+        throw new Error(
+          verification.error ?? "GitHub could not verify this token.",
+        );
       }
       setConnectedAs(verification.login ?? "GitHub account");
       setMessage("GitHub is connected and verified.");
@@ -125,30 +156,39 @@ export default function GitHubSetup({ chat }: GitHubSetupProps) {
             targetId: "connection.github",
           },
         },
-      }
+      },
     );
   }
 
   async function refreshOverview(): Promise<void> {
-    await chat.send("Check the GitHub connection and refresh the setup overview.", {
-      metadata: {
-        interaction: {
-          source: "onboarding-setup-hub",
-          kind: "onboarding-capability",
-          action: "check",
-          targetId: "connection.github",
+    await chat.send(
+      "Check the GitHub connection and refresh the setup overview.",
+      {
+        metadata: {
+          interaction: {
+            source: "onboarding-setup-hub",
+            kind: "onboarding-capability",
+            action: "check",
+            targetId: "connection.github",
+          },
         },
       },
-    });
+    );
   }
 
   return (
-    <Flex direction="column" gap="4" p="2" style={{ width: "100%", minWidth: 0 }}>
+    <Flex
+      direction="column"
+      gap="4"
+      p="2"
+      style={{ width: "100%", minWidth: 0 }}
+    >
       <Box>
         <Heading size="4">Connect GitHub</Heading>
         <Text as="div" size="2" color="gray">
-          Choose what Vibestudio should be able to do. We’ll configure GitHub’s recommended token
-          type and keep the token in the trusted credential store.
+          Choose what Vibestudio should be able to do. We’ll configure GitHub’s
+          recommended token type and keep the token in the trusted credential
+          store.
         </Text>
       </Box>
 
@@ -178,7 +218,8 @@ export default function GitHubSetup({ chat }: GitHubSetupProps) {
           gap="2"
           mt="2"
           style={{
-            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 18rem), 1fr))",
+            gridTemplateColumns:
+              "repeat(auto-fit, minmax(min(100%, 18rem), 1fr))",
           }}
         >
           {ACCESS_CHOICES.map((choice) => (
@@ -186,14 +227,21 @@ export default function GitHubSetup({ chat }: GitHubSetupProps) {
               key={choice.value}
               variant={accessLevel === choice.value ? "solid" : "soft"}
               onClick={() => setAccessLevel(choice.value)}
-              style={{ justifyContent: "flex-start", minHeight: 64, height: "auto" }}
+              style={{
+                justifyContent: "flex-start",
+                minHeight: 64,
+                height: "auto",
+              }}
             >
               <Flex direction="column" align="start" gap="1">
                 <Text size="2" weight="bold">
                   {choice.title}
                   {choice.recommended ? " · Recommended" : ""}
                 </Text>
-                <Text size="1" style={{ textAlign: "left", whiteSpace: "normal" }}>
+                <Text
+                  size="1"
+                  style={{ textAlign: "left", whiteSpace: "normal" }}
+                >
                   {choice.description}
                 </Text>
               </Flex>
@@ -207,8 +255,8 @@ export default function GitHubSetup({ chat }: GitHubSetupProps) {
           Create the token on GitHub
         </Text>
         <Text as="div" size="1" color="gray">
-          Open GitHub here for guided setup, or use your normal browser for saved sign-in, passkeys,
-          and password managers.
+          Open GitHub here for guided setup, or use your normal browser for
+          saved sign-in, passkeys, and password managers.
         </Text>
         <Flex gap="2" wrap="wrap" mt="2">
           <Button
@@ -228,7 +276,13 @@ export default function GitHubSetup({ chat }: GitHubSetupProps) {
             {busy === "external" ? "Opening…" : "Open in my browser"}
           </Button>
         </Flex>
-        <Text as="label" size="1" color="gray" mt="3" style={{ display: "block" }}>
+        <Text
+          as="label"
+          size="1"
+          color="gray"
+          mt="3"
+          style={{ display: "block" }}
+        >
           Organization owner (optional)
         </Text>
         <TextField.Root
@@ -239,8 +293,9 @@ export default function GitHubSetup({ chat }: GitHubSetupProps) {
           aria-label="Organization owner (optional)"
         />
         <Text as="p" size="1" color="gray" mt="1">
-          If provided, GitHub will target this organization when creating the fine-grained token.
-          You must be a member and the organization may need to approve the token.
+          If provided, GitHub will target this organization when creating the
+          fine-grained token. You must be a member and the organization may need
+          to approve the token.
         </Text>
       </Box>
 
@@ -254,12 +309,18 @@ export default function GitHubSetup({ chat }: GitHubSetupProps) {
 
       <Flex justify="end" gap="2" wrap="wrap">
         {connectedAs ? (
-          <Button variant="soft" disabled={busy !== null} onClick={() => void refreshOverview()}>
+          <Button
+            variant="soft"
+            disabled={busy !== null}
+            onClick={() => void refreshOverview()}
+          >
             Refresh setup overview
           </Button>
         ) : null}
         <Button disabled={busy !== null} onClick={() => void saveToken()}>
-          {busy === "save" ? "Opening trusted prompt…" : "I created the token — save it"}
+          {busy === "save"
+            ? "Opening trusted prompt…"
+            : "I created the token — save it"}
         </Button>
       </Flex>
     </Flex>

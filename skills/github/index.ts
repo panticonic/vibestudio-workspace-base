@@ -1,5 +1,8 @@
 import { credentials, git, openExternal, openPanel } from "@workspace/runtime";
-import type { RequestCredentialInputRequest, StoredCredentialSummary } from "@workspace/runtime";
+import type {
+  RequestCredentialInputRequest,
+  StoredCredentialSummary,
+} from "@workspace/runtime";
 import {
   GITHUB_FINE_GRAINED_BROAD_PERMISSIONS,
   githubBindings,
@@ -9,25 +12,36 @@ import { resolveGitHubPublishOperation } from "@workspace/integrations/github";
 const GITHUB_PROVIDER_ID = "github";
 const GITHUB_API_ORIGIN = "https://api.github.com";
 const GITHUB_GIT_ORIGIN = "https://github.com";
-const GITHUB_PAT_NEW_URL = "https://github.com/settings/personal-access-tokens/new";
-const GITHUB_PAT_LIST_URL = "https://github.com/settings/personal-access-tokens";
+const GITHUB_PAT_NEW_URL =
+  "https://github.com/settings/personal-access-tokens/new";
+const GITHUB_PAT_LIST_URL =
+  "https://github.com/settings/personal-access-tokens";
 const GITHUB_CLASSIC_PAT_NEW_URL = "https://github.com/settings/tokens/new";
 const GITHUB_CLASSIC_PAT_LIST_URL = "https://github.com/settings/tokens";
 
 type RuntimeCredentials = typeof credentials;
 type RuntimeGit = typeof git;
-type RuntimeGitStatusOptions = NonNullable<Parameters<RuntimeGit["upstreamStatus"]>[1]>;
-type RuntimeGitStatusResult = Awaited<ReturnType<RuntimeGit["upstreamStatus"]>>[number];
+type RuntimeGitStatusOptions = NonNullable<
+  Parameters<RuntimeGit["upstreamStatus"]>[1]
+>;
+type RuntimeGitStatusResult = Awaited<
+  ReturnType<RuntimeGit["upstreamStatus"]>
+>[number];
 type RuntimeGitPublishInput = Parameters<RuntimeGit["publishRepo"]>[0];
 type RuntimeGitPublishResult = Awaited<ReturnType<RuntimeGit["publishRepo"]>>;
 
-export type GitHubOnboardingStage = "needs-token" | "connected" | "verified" | "error";
+export type GitHubOnboardingStage =
+  | "needs-token"
+  | "connected"
+  | "verified"
+  | "error";
 export type GitHubCredentialMode = "api" | "git" | "api-and-git";
 export type GitHubTokenKind = "fine-grained" | "classic";
 export type GitHubAccessLevel =
   | "read-only"
   | "collaborate"
   | "publish"
+  | "publish-pages"
   | "code-workflows"
   | "broad";
 export type GitHubPermissionPreset =
@@ -43,7 +57,8 @@ export type GitHubPermissionPreset =
   | "statuses"
   | "deployments"
   | "discussions"
-  | "repository-admin";
+  | "repository-admin"
+  | "pages";
 
 export interface GitHubVerificationResult {
   valid: boolean;
@@ -109,20 +124,28 @@ export type GitHubUpstreamStatusResult = RuntimeGitStatusResult;
 export type PublishToGitHubOptions = Omit<RuntimeGitPublishInput, "provider">;
 export type PublishToGitHubResult = RuntimeGitPublishResult;
 
-export const GITHUB_PERMISSION_PRESETS: Record<GitHubPermissionPreset, string[]> = {
+export const GITHUB_PERMISSION_PRESETS: Record<
+  GitHubPermissionPreset,
+  string[]
+> = {
   clone: ["metadata:read", "contents:read"],
   pull: ["metadata:read", "contents:read"],
   push: ["metadata:read", "contents:write"],
   "contents-read": ["metadata:read", "contents:read"],
   "contents-write": ["metadata:read", "contents:write"],
   issues: ["metadata:read", "issues:read", "issues:write"],
-  "pull-requests": ["metadata:read", "pull_requests:read", "pull_requests:write"],
+  "pull-requests": [
+    "metadata:read",
+    "pull_requests:read",
+    "pull_requests:write",
+  ],
   "actions-read": ["metadata:read", "actions:read"],
   workflows: ["metadata:read", "contents:write", "workflows:write"],
   statuses: ["metadata:read", "statuses:read", "statuses:write"],
   deployments: ["metadata:read", "deployments:read", "deployments:write"],
   discussions: ["metadata:read", "discussions:read", "discussions:write"],
   "repository-admin": ["metadata:read", "administration:write"],
+  pages: ["metadata:read", "pages:read", "pages:write", "administration:write"],
 };
 
 export const GITHUB_ACCESS_LEVELS: Record<
@@ -225,6 +248,24 @@ export const GITHUB_ACCESS_LEVELS: Record<
       pull_requests: "write",
     },
   },
+  "publish-pages": {
+    label: "Publish websites with GitHub Pages",
+    mode: "api-and-git",
+    presets: ["push", "repository-admin", "pages"],
+    scopes: [
+      "metadata:read",
+      "contents:write",
+      "pages:read",
+      "pages:write",
+      "administration:write",
+    ],
+    fineGrainedPermissions: {
+      metadata: "read",
+      contents: "write",
+      pages: "write",
+      administration: "write",
+    },
+  },
   "code-workflows": {
     label: "Code + Workflows",
     mode: "api-and-git",
@@ -300,7 +341,7 @@ function getCredentialRuntime(): RuntimeCredentials {
   const api = credentials as Partial<RuntimeCredentials> | undefined;
   if (!api) {
     throw new Error(
-      "Vibestudio credential runtime is unavailable: @workspace/runtime did not export credentials."
+      "Vibestudio credential runtime is unavailable: @workspace/runtime did not export credentials.",
     );
   }
   for (const method of [
@@ -311,7 +352,7 @@ function getCredentialRuntime(): RuntimeCredentials {
   ] as const) {
     if (typeof api[method] !== "function") {
       throw new Error(
-        `Vibestudio credential runtime is unavailable: credentials.${method} is missing.`
+        `Vibestudio credential runtime is unavailable: credentials.${method} is missing.`,
       );
     }
   }
@@ -321,10 +362,14 @@ function getCredentialRuntime(): RuntimeCredentials {
 function getGitRuntime(): Pick<RuntimeGit, "upstreamStatus" | "publishRepo"> {
   const api = git as Partial<RuntimeGit> | undefined;
   if (!api || typeof api.upstreamStatus !== "function") {
-    throw new Error("Vibestudio git runtime is unavailable: git.upstreamStatus is missing.");
+    throw new Error(
+      "Vibestudio git runtime is unavailable: git.upstreamStatus is missing.",
+    );
   }
   if (typeof api.publishRepo !== "function") {
-    throw new Error("Vibestudio git runtime is unavailable: git.publishRepo is missing.");
+    throw new Error(
+      "Vibestudio git runtime is unavailable: git.publishRepo is missing.",
+    );
   }
   return api as Pick<RuntimeGit, "upstreamStatus" | "publishRepo">;
 }
@@ -343,7 +388,7 @@ function normalizeCredentialRuntimeError(error: unknown): Error {
   return new Error(
     "Vibestudio credential runtime is unavailable in this context. " +
       "GitHub helpers must run in a Vibestudio panel/eval/worker runtime with credentials initialized. " +
-      `Original error: ${message}`
+      `Original error: ${message}`,
   );
 }
 
@@ -361,11 +406,13 @@ function normalizeRuntimeError(error: unknown): Error {
   return new Error(
     "Vibestudio runtime is unavailable in this context. " +
       "GitHub upstream helpers must run in a Vibestudio panel/eval/worker runtime with git initialized. " +
-      `Original error: ${message}`
+      `Original error: ${message}`,
   );
 }
 
-async function withCredentialRuntime<T>(fn: (api: RuntimeCredentials) => Promise<T>): Promise<T> {
+async function withCredentialRuntime<T>(
+  fn: (api: RuntimeCredentials) => Promise<T>,
+): Promise<T> {
   try {
     return await fn(getCredentialRuntime());
   } catch (error) {
@@ -374,7 +421,7 @@ async function withCredentialRuntime<T>(fn: (api: RuntimeCredentials) => Promise
 }
 
 async function withGitRuntime<T>(
-  fn: (api: Pick<RuntimeGit, "upstreamStatus" | "publishRepo">) => Promise<T>
+  fn: (api: Pick<RuntimeGit, "upstreamStatus" | "publishRepo">) => Promise<T>,
 ): Promise<T> {
   try {
     return await fn(getGitRuntime());
@@ -397,12 +444,14 @@ function isGitHubCredential(credential: StoredCredentialSummary): boolean {
 }
 
 function getPrimaryCredential(
-  credentials: StoredCredentialSummary[]
+  credentials: StoredCredentialSummary[],
 ): StoredCredentialSummary | undefined {
   return credentials.find((credential) => !credential.revokedAt);
 }
 
-function getDefaultPresets(mode: GitHubCredentialMode): GitHubPermissionPreset[] {
+function getDefaultPresets(
+  mode: GitHubCredentialMode,
+): GitHubPermissionPreset[] {
   switch (mode) {
     case "git":
       return ["clone", "pull", "push"];
@@ -416,19 +465,27 @@ function getDefaultPresets(mode: GitHubCredentialMode): GitHubPermissionPreset[]
 function getPresetScopes(
   mode: GitHubCredentialMode,
   presets: GitHubPermissionPreset[] | undefined,
-  scopes: string[] | undefined
+  scopes: string[] | undefined,
 ): string[] {
   if (scopes?.length) return scopes;
-  const selected: GitHubPermissionPreset[] = presets?.length ? presets : getDefaultPresets(mode);
-  return [...new Set(selected.flatMap((preset) => GITHUB_PERMISSION_PRESETS[preset]))];
+  const selected: GitHubPermissionPreset[] = presets?.length
+    ? presets
+    : getDefaultPresets(mode);
+  return [
+    ...new Set(selected.flatMap((preset) => GITHUB_PERMISSION_PRESETS[preset])),
+  ];
 }
 
 function buildCredentialRequest(
-  opts: RequestGitHubTokenCredentialOptions = {}
+  opts: RequestGitHubTokenCredentialOptions = {},
 ): RequestCredentialInputRequest {
   const useFriendlyDefault =
-    !opts.accessLevel && !opts.mode && !opts.presets?.length && !opts.scopes?.length;
-  const accessLevel = opts.accessLevel ?? (useFriendlyDefault ? "collaborate" : undefined);
+    !opts.accessLevel &&
+    !opts.mode &&
+    !opts.presets?.length &&
+    !opts.scopes?.length;
+  const accessLevel =
+    opts.accessLevel ?? (useFriendlyDefault ? "collaborate" : undefined);
   const access = accessLevel ? GITHUB_ACCESS_LEVELS[accessLevel] : undefined;
   const mode = opts.mode ?? access?.mode ?? "api";
   const tokenKind = opts.tokenKind ?? "fine-grained";
@@ -467,12 +524,15 @@ function buildCredentialRequest(
       scopes,
       metadata: {
         providerId: GITHUB_PROVIDER_ID,
-        providerKind: tokenKind === "classic" ? "classic-pat" : "fine-grained-pat",
+        providerKind:
+          tokenKind === "classic" ? "classic-pat" : "fine-grained-pat",
         credentialMode: mode,
         ...(accessLevel ? { accessLevel } : {}),
         ...(targetName ? { targetName } : {}),
         upstreamAccessMode:
-          tokenKind === "classic" ? "github-classic-broad" : "github-fine-grained-broad",
+          tokenKind === "classic"
+            ? "github-classic-broad"
+            : "github-fine-grained-broad",
         localBindingCatalog: "github:v2",
         permissionPresets: defaultPresets.join(","),
         ...(mode === "api" ? {} : { gitRemoteOrigin: `${GITHUB_GIT_ORIGIN}/` }),
@@ -497,7 +557,9 @@ function buildCredentialRequest(
   };
 }
 
-function getNextActions(status: Pick<GitHubOnboardingStatus, "stage">): string[] {
+function getNextActions(
+  status: Pick<GitHubOnboardingStatus, "stage">,
+): string[] {
   switch (status.stage) {
     case "needs-token":
       return [
@@ -506,7 +568,9 @@ function getNextActions(status: Pick<GitHubOnboardingStatus, "stage">): string[]
         "Let the checked-in workflow handle browser placement, trusted token entry, and verification directly.",
       ];
     case "connected":
-      return ["Run verifyGitHubCredential(connectionId) before declaring onboarding complete."];
+      return [
+        "Run verifyGitHubCredential(connectionId) before declaring onboarding complete.",
+      ];
     case "verified":
       return ["Continue onboarding with the verified GitHub credential."];
     case "error":
@@ -550,7 +614,7 @@ function buildStatus(input: {
 }
 
 export async function openGitHubTokenSettings(
-  opts: OpenGitHubTokenSettingsOptions = {}
+  opts: OpenGitHubTokenSettingsOptions = {},
 ): Promise<void> {
   const url = buildGitHubTokenSettingsUrl(opts);
   if (opts.browser === "internal") {
@@ -561,7 +625,7 @@ export async function openGitHubTokenSettings(
 }
 
 export function buildGitHubTokenSettingsUrl(
-  opts: Omit<OpenGitHubTokenSettingsOptions, "browser"> = {}
+  opts: Omit<OpenGitHubTokenSettingsOptions, "browser"> = {},
 ): string {
   const tokenKind = opts.tokenKind ?? "fine-grained";
   if (tokenKind === "classic") {
@@ -571,15 +635,20 @@ export function buildGitHubTokenSettingsUrl(
   const access = GITHUB_ACCESS_LEVELS[opts.accessLevel ?? "collaborate"];
   const url = new URL(GITHUB_PAT_NEW_URL);
   url.searchParams.set("name", opts.name ?? "Vibestudio");
-  url.searchParams.set("description", opts.description ?? `${access.label} access for Vibestudio`);
+  url.searchParams.set(
+    "description",
+    opts.description ?? `${access.label} access for Vibestudio`,
+  );
   url.searchParams.set(
     "expires_in",
-    opts.expiresIn === "none" ? "none" : String(opts.expiresIn ?? 90)
+    opts.expiresIn === "none" ? "none" : String(opts.expiresIn ?? 90),
   );
   if (opts.targetName) {
     url.searchParams.set("target_name", opts.targetName);
   }
-  for (const [permission, level] of Object.entries(access.fineGrainedPermissions)) {
+  for (const [permission, level] of Object.entries(
+    access.fineGrainedPermissions,
+  )) {
     url.searchParams.set(permission, level);
   }
   return url.toString();
@@ -595,24 +664,30 @@ export function getGitHubTokenSetupLinks() {
 }
 
 export async function requestGitHubTokenCredential(
-  opts: RequestGitHubTokenCredentialOptions = {}
+  opts: RequestGitHubTokenCredentialOptions = {},
 ): Promise<StoredCredentialSummary> {
-  return withCredentialRuntime((api) => api.requestCredentialInput(buildCredentialRequest(opts)));
+  return withCredentialRuntime((api) =>
+    api.requestCredentialInput(buildCredentialRequest(opts)),
+  );
 }
 
-export async function listGitHubCredentials(): Promise<StoredCredentialSummary[]> {
+export async function listGitHubCredentials(): Promise<
+  StoredCredentialSummary[]
+> {
   return withCredentialRuntime(async (api) => {
     const all = await api.listStoredCredentials();
     return all.filter(isGitHubCredential);
   });
 }
 
-export async function revokeGitHubCredential(credentialId: string): Promise<void> {
+export async function revokeGitHubCredential(
+  credentialId: string,
+): Promise<void> {
   await withCredentialRuntime((api) => api.revokeCredential(credentialId));
 }
 
 export async function verifyGitHubCredential(
-  credentialId: string
+  credentialId: string,
 ): Promise<GitHubVerificationResult> {
   return withCredentialRuntime(async (api) => {
     const response = await api.fetch(
@@ -623,10 +698,14 @@ export async function verifyGitHubCredential(
           "x-github-api-version": "2022-11-28",
         },
       },
-      { credentialId }
+      { credentialId },
     );
     if (!response.ok) {
-      return { valid: false, credentialId, error: `${response.status} ${response.statusText}` };
+      return {
+        valid: false,
+        credentialId,
+        error: `${response.status} ${response.statusText}`,
+      };
     }
     const body = (await response.json()) as { login?: string; id?: number };
     return {
@@ -639,7 +718,7 @@ export async function verifyGitHubCredential(
 }
 
 export async function verifyGitHubConnection(
-  connectionId: string
+  connectionId: string,
 ): Promise<GitHubVerificationResult> {
   return verifyGitHubCredential(connectionId);
 }
@@ -653,13 +732,13 @@ function normalizeGitHubRemoteUrl(remoteUrl: string): string {
   }
   if (parsed.protocol !== "https:" || parsed.origin !== GITHUB_GIT_ORIGIN) {
     throw new Error(
-      `GitHub git verification only supports https://github.com remotes: ${remoteUrl}`
+      `GitHub git verification only supports https://github.com remotes: ${remoteUrl}`,
     );
   }
   const path = parsed.pathname.replace(/\/+$/, "");
   if (!path || path === "/" || !path.endsWith(".git")) {
     throw new Error(
-      `GitHub remote URL must be an https .git URL such as https://github.com/owner/repo.git: ${remoteUrl}`
+      `GitHub remote URL must be an https .git URL such as https://github.com/owner/repo.git: ${remoteUrl}`,
     );
   }
   parsed.pathname = path;
@@ -670,13 +749,13 @@ function normalizeGitHubRemoteUrl(remoteUrl: string): string {
 
 export async function verifyGitHubGitRemoteAccess(
   remoteUrl: string,
-  credentialId?: string
+  credentialId?: string,
 ): Promise<GitHubGitRemoteVerificationResult> {
   const normalizedRemoteUrl = normalizeGitHubRemoteUrl(remoteUrl);
   return withCredentialRuntime(async (api) => {
     if (typeof api.gitHttp !== "function") {
       throw new Error(
-        "Vibestudio credential runtime is unavailable: credentials.gitHttp is missing."
+        "Vibestudio credential runtime is unavailable: credentials.gitHttp is missing.",
       );
     }
     const verificationUrl = `${normalizedRemoteUrl}/info/refs?service=git-upload-pack`;
@@ -696,62 +775,78 @@ export async function verifyGitHubGitRemoteAccess(
       action: "read",
       statusCode: response.statusCode,
       statusMessage: response.statusMessage,
-      ...(accessible ? {} : { error: `${response.statusCode} ${response.statusMessage}` }),
+      ...(accessible
+        ? {}
+        : { error: `${response.statusCode} ${response.statusMessage}` }),
     };
   });
 }
 
 export async function upstreamStatus(
   repoPath: string,
-  options?: GitHubUpstreamStatusOptions
+  options?: GitHubUpstreamStatusOptions,
 ): Promise<GitHubUpstreamStatusResult> {
   const rows = await withGitRuntime((api) =>
-    options ? api.upstreamStatus([repoPath], options) : api.upstreamStatus([repoPath])
+    options
+      ? api.upstreamStatus([repoPath], options)
+      : api.upstreamStatus([repoPath]),
   );
   const row = rows[0];
   if (!row) {
-    throw new Error(`gitInterop.upstreamStatus returned no row for ${repoPath}`);
+    throw new Error(
+      `gitInterop.upstreamStatus returned no row for ${repoPath}`,
+    );
   }
   return row;
 }
 
 export async function publishToGitHub(
-  options: PublishToGitHubOptions
+  options: PublishToGitHubOptions,
 ): Promise<PublishToGitHubResult> {
   const explicitOrganization = options.organization?.trim();
   if (options.organization !== undefined && !explicitOrganization) {
-    throw new Error("GitHub organization must be a non-empty organization name when provided.");
+    throw new Error(
+      "GitHub organization must be a non-empty organization name when provided.",
+    );
   }
 
   const operation = await withCredentialRuntime((api) =>
     resolveGitHubPublishOperation(api, {
       ...(options.credentialId ? { credentialId: options.credentialId } : {}),
       ...(explicitOrganization ? { organization: explicitOrganization } : {}),
-    })
+    }),
   );
   return withGitRuntime((api) =>
     api.publishRepo({
       ...options,
       credentialId: operation.credentialId,
-      ...(operation.organization ? { organization: operation.organization } : {}),
+      ...(operation.organization
+        ? { organization: operation.organization }
+        : {}),
       provider: GITHUB_PROVIDER_ID,
-    })
+    }),
   );
 }
 
 export async function getGitHubOnboardingStatus(
-  opts: GitHubOnboardingStatusOptions = {}
+  opts: GitHubOnboardingStatusOptions = {},
 ): Promise<GitHubOnboardingStatus> {
   const warnings: string[] = [];
   try {
     const githubCredentials = await listGitHubCredentials();
     const primary = getPrimaryCredential(githubCredentials);
     const verification =
-      opts.verify && primary ? await verifyGitHubCredential(primary.id) : undefined;
+      opts.verify && primary
+        ? await verifyGitHubCredential(primary.id)
+        : undefined;
     if (verification && !verification.valid && verification.error) {
       warnings.push(`GitHub verification failed: ${verification.error}`);
     }
-    return buildStatus({ credentials: githubCredentials, verification, warnings });
+    return buildStatus({
+      credentials: githubCredentials,
+      verification,
+      warnings,
+    });
   } catch (error) {
     const normalized = normalizeCredentialRuntimeError(error);
     const status: GitHubOnboardingStatus = {
@@ -788,8 +883,13 @@ export async function checkGitHubConnection(): Promise<{
 export async function verifyGitHubRepoAccess(
   owner: string,
   repo: string,
-  credentialId?: string
-): Promise<{ accessible: boolean; fullName?: string; private?: boolean; error?: string }> {
+  credentialId?: string,
+): Promise<{
+  accessible: boolean;
+  fullName?: string;
+  private?: boolean;
+  error?: string;
+}> {
   const encodedOwner = encodeURIComponent(owner);
   const encodedRepo = encodeURIComponent(repo);
   return withCredentialRuntime(async (api) => {
@@ -801,12 +901,18 @@ export async function verifyGitHubRepoAccess(
           "x-github-api-version": "2022-11-28",
         },
       },
-      { credentialId }
+      { credentialId },
     );
     if (!response.ok) {
-      return { accessible: false, error: `${response.status} ${response.statusText}` };
+      return {
+        accessible: false,
+        error: `${response.status} ${response.statusText}`,
+      };
     }
-    const body = (await response.json()) as { full_name?: string; private?: boolean };
+    const body = (await response.json()) as {
+      full_name?: string;
+      private?: boolean;
+    };
     return {
       accessible: true,
       fullName: body.full_name,
@@ -815,7 +921,9 @@ export async function verifyGitHubRepoAccess(
   });
 }
 
-export function formatGitHubOnboardingStatus(status: GitHubOnboardingStatus): string {
+export function formatGitHubOnboardingStatus(
+  status: GitHubOnboardingStatus,
+): string {
   const lines = [
     `GitHub stage: ${status.stage}`,
     `connected=${status.connected}`,
@@ -826,7 +934,9 @@ export function formatGitHubOnboardingStatus(status: GitHubOnboardingStatus): st
   if (status.targetName) lines.push(`targetName=${status.targetName}`);
   if (status.completedAt) lines.push(`completedAt=${status.completedAt}`);
   if (status.error) lines.push(`error=${status.error}`);
-  if (status.warnings.length) lines.push(`warnings=${status.warnings.join("; ")}`);
-  if (status.nextActions.length) lines.push(`nextActions=${status.nextActions.join(" | ")}`);
+  if (status.warnings.length)
+    lines.push(`warnings=${status.warnings.join("; ")}`);
+  if (status.nextActions.length)
+    lines.push(`nextActions=${status.nextActions.join(" | ")}`);
   return lines.join("\n");
 }
