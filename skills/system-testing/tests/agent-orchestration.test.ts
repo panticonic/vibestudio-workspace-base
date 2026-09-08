@@ -9,7 +9,9 @@ describe("agent orchestration scenarios", () => {
     for (const test of agentOrchestrationTests) {
       expect(agentGoalPromptFindings(test.prompt), test.name).toEqual([]);
       expect(test.validation, test.name).toBe(
-        test.name === "subagent-diff-inspection" ? "agent-evidence" : undefined
+        ["subagent-diff-inspection", "subagent-reviewed-merge"].includes(test.name)
+          ? "agent-evidence"
+          : undefined
       );
     }
   });
@@ -26,6 +28,8 @@ describe("agent orchestration scenarios", () => {
       details: Record<string, unknown>,
       protocolText = ""
     ) => ({
+      id,
+      content: "",
       kind: "message" as const,
       senderId: "agent",
       complete: true,
@@ -36,6 +40,7 @@ describe("agent orchestration scenarios", () => {
         arguments: arguments_,
         execution: {
           status: "complete" as const,
+          description: "",
           isError: false,
           result: {
             protocolContent: protocolText ? [{ type: "text", text: protocolText }] : [],
@@ -100,7 +105,66 @@ describe("agent orchestration scenarios", () => {
         ],
       }) as TestExecutionResult;
 
-    expect(test.validate(execution())).toEqual({ passed: true, reason: undefined });
+    expect(test.validate(execution())).toEqual({
+      passed: true,
+      reason: undefined,
+    });
+    const mergeTest = agentOrchestrationTests.find(
+      ({ name }) => name === "subagent-reviewed-merge"
+    )!;
+    const mergedExecution = (event = sourceEventId, concluded = true, remaining = 0) => {
+      const result = execution();
+      result.messages.splice(
+        -1,
+        0,
+        invocation(
+          "merge_subagent",
+          "merge-child",
+          { runId: runHandle },
+          {
+            runId: runHandle,
+            sourceEventId: event,
+            review: {
+              resolution: {
+                complete: true,
+                concluded,
+                remainingCoordinateCount: remaining,
+              },
+            },
+          }
+        )
+      );
+      return result;
+    };
+    expect(mergeTest.validate(mergedExecution()).passed).toBe(true);
+    expect(mergeTest.validate(execution()).passed).toBe(false);
+    expect(mergeTest.validate(mergedExecution("workspace-event:other")).passed).toBe(false);
+    expect(mergeTest.validate(mergedExecution(sourceEventId, false)).passed).toBe(false);
+    expect(mergeTest.validate(mergedExecution(sourceEventId, true, 1)).passed).toBe(false);
+    expect(test.validate(mergedExecution()).passed).toBe(false);
+    const prematureMerge = mergedExecution();
+    const [merge] = prematureMerge.messages.splice(3, 1);
+    prematureMerge.messages.splice(2, 0, merge!);
+    expect(mergeTest.validate(prematureMerge).passed).toBe(false);
+    const resolvedMerge = mergedExecution();
+    resolvedMerge.messages.splice(
+      3,
+      0,
+      invocation(
+        "merge_subagent",
+        "partial-merge",
+        { runId: runHandle },
+        {
+          runId: runHandle,
+          sourceEventId,
+          review: {
+            resolution: { complete: false, concluded: false, remainingCoordinateCount: 1 },
+          },
+        }
+      )
+    );
+    expect(mergeTest.validate(resolvedMerge).passed).toBe(true);
+
     expect(test.validate(execution("workspace-event:other")).passed).toBe(false);
     expect(test.validate(execution(sourceEventId, "complete")).passed).toBe(false);
     expect(test.validate(execution(sourceEventId, "unattempted", "another-run")).passed).toBe(

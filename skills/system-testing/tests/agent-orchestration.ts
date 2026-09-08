@@ -40,7 +40,7 @@ function protocolText(call: ReturnType<typeof getToolCalls>[number]): string {
     : "";
 }
 
-function validateUnintegratedSubagentDiff(result: TestExecutionResult) {
+function validateSubagentDiff(result: TestExecutionResult, integrate: boolean) {
   const base = validateAgentCompletionReport(result);
   if (!base.passed) return base;
   const calls = getToolCalls(result);
@@ -51,11 +51,17 @@ function validateUnintegratedSubagentDiff(result: TestExecutionResult) {
       call.execution.isError !== true
   );
   if (!spawn) {
-    return { passed: false, reason: "No completed child launch established a canonical run" };
+    return {
+      passed: false,
+      reason: "No completed child launch established a canonical run",
+    };
   }
   const runHandle = callDetails(spawn)?.["runId"];
   if (typeof runHandle !== "string" || !runHandle) {
-    return { passed: false, reason: "The child launch receipt did not identify its exact run" };
+    return {
+      passed: false,
+      reason: "The child launch receipt did not identify its exact run",
+    };
   }
   const task = result.messages.find(
     (message) =>
@@ -112,14 +118,33 @@ function validateUnintegratedSubagentDiff(result: TestExecutionResult) {
   // phrase it has to say. Grading the prose failed an agent that wrote "without
   // integrating" because the alternation happened to list "not integrated" —
   // that measures wording, not behaviour.
-  const merged = calls.find(
+  const merges = calls.filter(
     (call) =>
       call.name === "merge_subagent" &&
       sameRunReference(call.arguments?.["runId"], runHandle) &&
       call.execution?.status === "complete" &&
       call.execution.isError !== true
   );
-  if (merged) {
+  if (integrate) {
+    const merged = merges.find((call) => {
+      const details = callDetails(call);
+      const resolution = record(record(details?.["review"])?.["resolution"]);
+      return (
+        calls.indexOf(call) > calls.indexOf(inspection) &&
+        sameRunReference(details?.["runId"], runHandle) &&
+        details?.["sourceEventId"] === sourceEventId &&
+        resolution?.["complete"] === true &&
+        resolution["concluded"] === true &&
+        resolution["remainingCoordinateCount"] === 0
+      );
+    });
+    if (!merged) {
+      return {
+        passed: false,
+        reason: "The reviewed child event was not completely integrated into the parent",
+      };
+    }
+  } else if (merges.length > 0) {
     return {
       passed: false,
       reason: "The parent integrated the child's work in a case whose whole point is not to",
@@ -145,7 +170,17 @@ export const agentOrchestrationTests: TestCase[] = [
     prompt:
       "Ask a fresh subagent to add one small deterministic typed export in the disposable package. Review what the child changed without integrating it, then summarize the bounded diff.",
     validation: "agent-evidence",
-    validate: validateUnintegratedSubagentDiff,
+    validate: (result) => validateSubagentDiff(result, false),
+  },
+  {
+    name: "subagent-reviewed-merge",
+    description: "A parent reviews a child's committed source diff and integrates that exact event",
+    category: "agent-orchestration",
+    workspaceRepoFixture: BUILDABLE_PACKAGE_WORKSPACE_REPO_FIXTURE,
+    prompt:
+      "Ask a fresh subagent to add one small deterministic typed export in the disposable package. Review the child's diff before integrating the change into your workspace, then summarize the result.",
+    validation: "agent-evidence",
+    validate: (result) => validateSubagentDiff(result, true),
   },
   {
     name: "subagent-design-synthesis",
