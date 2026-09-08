@@ -1,4 +1,4 @@
-import { PanelTrustBadge } from "./PanelTrustBadge";
+import { usePanelTrust } from "./usePanelTrust";
 import {
   useShellWorkspaceClient,
   useWorkspaceNavigationHost,
@@ -1364,6 +1364,7 @@ function HoverableBreadcrumbItem({
   const { panel } = useShellWorkspaceClient();
 
   const [isHovered, setIsHovered] = useState(false);
+  const trust = usePanelTrust(panelId, source);
   const isTouch = useTouchDevice();
 
   // Clicking the already-active breadcrumb opens the address/controls view;
@@ -1413,20 +1414,22 @@ function HoverableBreadcrumbItem({
   };
 
   return (
-    <Tooltip content={title}>
+    <Tooltip content={`${title} · ${trust.description}`}>
       <span
         role="button"
         tabIndex={0}
         data-breadcrumb-focusable="true"
         data-breadcrumb-id={panelId}
+        data-panel-trust={trust.state}
+        aria-label={title}
+        aria-description={trust.description}
         data-breadcrumb-current={isCurrentActive ? "true" : undefined}
         title={isCurrentActive ? "Edit address" : undefined}
         style={{
           position: "relative",
           ...itemStyle,
-          // Breadcrumb look (not tabs): the current item reads as a soft grey
-          // fill rather than a hard outlined box — calmer in the dense titlebar,
-          // and neutral so the frame doesn't tint against a browser page.
+          // Keep selection and hover beneath the quiet website hue.
+          backgroundImage: trust.backgroundImage,
           borderColor: "transparent",
           backgroundColor: isCurrentActive
             ? isHovered
@@ -1457,7 +1460,6 @@ function HoverableBreadcrumbItem({
           size={BREADCRUMB_ICON_SIZE}
           fallback={source?.startsWith("browser:") ? "browser" : "panel"}
         />
-        <PanelTrustBadge panelId={panelId} source={source} />
         <Text
           as="span"
           size="2"

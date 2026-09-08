@@ -1,4 +1,4 @@
-import { PanelTrustBadge } from "./PanelTrustBadge";
+import { usePanelTrust } from "./usePanelTrust";
 import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 /**
  * LazyPanelTreeSidebar - Sortable panel tree sidebar with drag-and-drop.
@@ -321,6 +321,7 @@ const SortableTreeItem = memo(
   }: SortableTreeItemProps) {
     const { panel, depth, collapsed } = item;
     const [isHovered, setIsHovered] = useState(false);
+    const trust = usePanelTrust(panel.id, panel.source);
     const pinnedPanelIds = useAtomValue(pinnedPanelIdsAtom);
     const isPinned = pinnedPanelIds.has(panel.id);
     const expandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -478,6 +479,7 @@ const SortableTreeItem = memo(
       height: ROW_HEIGHT,
       cursor: "pointer",
       backgroundColor: getRowBackground(isSelected, isHovered, isVisible),
+      backgroundImage: trust.backgroundImage,
       borderRadius: "var(--radius-2)",
       paddingLeft: ROW_PADDING_LEFT + depth * INDENTATION_WIDTH,
       paddingRight: ROW_PADDING_LEFT,
@@ -505,6 +507,9 @@ const SortableTreeItem = memo(
           data-panel-tree-row="true"
           data-panel-id={panel.id}
           aria-label={`Select panel ${panel.title}`}
+          aria-description={trust.description}
+          title={trust.description}
+          data-panel-trust={trust.state}
           style={rowStyle}
           data-active={isSelected ? "true" : "false"}
           onClick={handleSelect}
@@ -566,7 +571,6 @@ const SortableTreeItem = memo(
             fallback={panel.source?.startsWith("browser:") ? "browser" : "panel"}
           />
 
-          <PanelTrustBadge panelId={panel.id} source={panel.source} />
           {/* Title — the focal element; brightened + weighted when selected */}
           <Text
             size="2"

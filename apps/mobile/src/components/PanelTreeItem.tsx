@@ -1,4 +1,4 @@
-import { PanelTrustBadge } from "./PanelTrustBadge";
+import { usePanelTrust } from "./usePanelTrust";
 /**
  * PanelTreeItem -- Individual tree node in the panel drawer.
  *
@@ -73,6 +73,7 @@ export function PanelTreeItem({
   onToggleCollapse,
   onArchive,
 }: PanelTreeItemProps) {
+  const trust = usePanelTrust(item.id, item.source, item.kind);
   const translateX = useSharedValue(0);
   const itemHeight = useSharedValue(ITEM_HEIGHT);
   const itemOpacity = useSharedValue(1);
@@ -173,6 +174,15 @@ export function PanelTreeItem({
             rowAnimatedStyle,
           ]}
         >
+          {trust.tint && (
+            <View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFillObject,
+                { backgroundColor: trust.tint },
+              ]}
+            />
+          )}
           {/* Expand/collapse chevron */}
           {item.childCount > 0 ? (
             <Pressable
@@ -201,6 +211,7 @@ export function PanelTreeItem({
             style={styles.titlePressable}
             accessibilityRole="button"
             accessibilityLabel={`${item.title}. Long-press for actions.`}
+            accessibilityHint={trust.description}
           >
             <MobilePanelIcon
               icon={item.icon}
@@ -225,7 +236,6 @@ export function PanelTreeItem({
             >
               {item.title}
             </Text>
-            <PanelTrustBadge panelId={item.id} source={item.source} kind={item.kind} />
           </Pressable>
 
           {/* Pin indicator — quiet glyph, only when pinned */}

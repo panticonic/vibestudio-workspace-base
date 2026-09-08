@@ -1,4 +1,4 @@
-import { PanelTrustBadge } from "./PanelTrustBadge";
+import { usePanelTrust } from "./usePanelTrust";
 /**
  * AppBar -- Top chrome for the mobile workspace app.
  *
@@ -153,6 +153,11 @@ export function AppBar({
         : ("workspace" as const),
     };
   }, [activePanelId, panelTreeRevision, shellClient]);
+  const trust = usePanelTrust(
+    activePanelId,
+    activePanelIdentity?.source,
+    activePanelIdentity?.kind,
+  );
   const resolveBrowserFavicon = useCallback(
     (url: string) =>
       shellClient?.panels.getPageFaviconDataUrl(url) ?? Promise.resolve(null),
@@ -254,6 +259,7 @@ export function AppBar({
                 ? "Edit address. Long-press to go to another panel."
                 : "Edit address. Long-press for panel menu."
             }
+            accessibilityHint={trust.description}
             style={({ pressed }) => [
               styles.pill,
               {
@@ -264,6 +270,15 @@ export function AppBar({
               },
             ]}
           >
+            {trust.tint && (
+              <View
+                pointerEvents="none"
+                style={[
+                  StyleSheet.absoluteFillObject,
+                  { backgroundColor: trust.tint, borderRadius: radius.pill },
+                ]}
+              />
+            )}
             {activePanelIdentity ? (
               <View style={styles.pillIdentity}>
                 <MobilePanelIcon
@@ -298,7 +313,6 @@ export function AppBar({
                 </Text>
               ) : null}
             </View>
-            {activePanelId && activePanelIdentity && <PanelTrustBadge panelId={activePanelId} {...activePanelIdentity} showWorkspace />}
             {isLoading || creatingPanel ? (
               <ActivityIndicator
                 size="small"

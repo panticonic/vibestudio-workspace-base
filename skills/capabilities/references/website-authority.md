@@ -57,7 +57,8 @@ General installed mutable-identity migration is not yet complete.
 
 A browser-panel approval must visibly identify the authenticated origin and
 website provenance even when an installed receiver performs the operation.
-Use trusted workspace chrome for consent and Web/Connected web indicators;
+Use trusted workspace chrome for consent and subtle browser/connected-browser
+background hues with accessible trust descriptions;
 a website-rendered badge, title, favicon, or prompt is not evidence of trust.
 The approval explains the resource, effect, result disclosure, and offered
 lifetime. Detailed identity evidence may include the source workspace,
