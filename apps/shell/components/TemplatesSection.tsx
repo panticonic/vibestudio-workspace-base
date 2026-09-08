@@ -32,7 +32,7 @@ export function TemplatesSection(
 }
 
 function TemplateCreationSection() {
-  const { templates, hubControl } = useShellWorkspaceClient();
+  const { templates, hubControl, credentials } = useShellWorkspaceClient();
   const approvalPresentation = useApprovalPresentation();
   const closeSettings = useSetAtom(settingsDialogAtom);
   const openWorkspaceChooser = useSetAtom(workspaceChooserDialogOpenAtom);
@@ -74,6 +74,7 @@ function TemplateCreationSection() {
       ) : null}
       <TemplateBrowser
         client={templates}
+        listSourceAccounts={credentials.listStoredCredentials}
         candidates={candidates}
         onReviewPending={(approvalId) => {
           void systemWorkspaceId.then((ownerId) => {

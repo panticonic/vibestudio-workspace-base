@@ -5,15 +5,7 @@ import {
 import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/types";
 import { useEffect, useRef, useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
-import {
-  Box,
-  Button,
-  Callout,
-  Flex,
-  Spinner,
-  Text,
-  TextField,
-} from "@radix-ui/themes";
+import { Box, Button, Callout, Flex, Spinner, Text } from "@radix-ui/themes";
 import { TemplateBrowser } from "@workspace/react/templates";
 import { sameWorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
 import {
@@ -29,15 +21,13 @@ import {
 } from "../state/appModeAtoms";
 
 export function WorkspaceChooser() {
-  const { hubControl, templates } = useShellWorkspaceClient();
+  const { hubControl, templates, credentials } = useShellWorkspaceClient();
   const desktop = useWorkspaceDesktopHost();
   const approvalPresentation = useApprovalPresentation();
   const close = useSetAtom(workspaceChooserDialogOpenAtom);
   const [sourceUrl, setSourceUrl] = useAtom(workspaceCreationSourceUrlAtom);
   const [template, setTemplate] = useAtom(workspaceChooserTemplateAtom);
-  const [mode, setMode] = useState<"blank" | "source">("source");
   const [busy, setBusy] = useState(false);
-  const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<WorkspaceCreationReceipt | null>(null);
   const [candidateDiscovery, setCandidateDiscovery] = useState<
@@ -71,9 +61,7 @@ export function WorkspaceChooser() {
         );
         if (saved) {
           setRecoveredInput(saved);
-          setName(saved.workspace);
           setTemplate(saved.rootTemplate ?? null);
-          setMode(saved.rootTemplate ? "source" : "blank");
           setRecoveryNotice(
             `A previous creation of ${saved.workspace} may have completed. Continue to check its result before submitting anything again.`,
           );
@@ -107,9 +95,6 @@ export function WorkspaceChooser() {
       live = false;
     };
   }, [hubControl]);
-  useEffect(() => {
-    if (template) setMode("source");
-  }, [template]);
   const open = async (workspaceId: string) => {
     setBusy(true);
     setError(null);
@@ -170,24 +155,6 @@ export function WorkspaceChooser() {
   return (
     <Box p="0" style={{ maxHeight: "80vh", overflow: "auto" }}>
       <Flex direction="column" gap="4">
-        {!created && !template && !recoveredInput ? (
-          <Flex gap="2" role="group" aria-label="Workspace starting point">
-            <Button
-              variant={mode === "source" ? "solid" : "soft"}
-              disabled={busy}
-              onClick={() => setMode("source")}
-            >
-              From an example or source
-            </Button>
-            <Button
-              variant={mode === "blank" ? "solid" : "soft"}
-              disabled={busy}
-              onClick={() => setMode("blank")}
-            >
-              Start blank
-            </Button>
-          </Flex>
-        ) : null}
         {recoveryNotice ? (
           <Callout.Root>
             <Callout.Text>{recoveryNotice}</Callout.Text>
@@ -222,17 +189,14 @@ export function WorkspaceChooser() {
           >
             Continue previous creation
           </Button>
-        ) : mode === "source" &&
-          template &&
-          candidateDiscovery.status === "loading" ? (
+        ) : template && candidateDiscovery.status === "loading" ? (
           <Flex gap="2" role="status">
             <Spinner />
             <Text size="2">Loading workspace source…</Text>
           </Flex>
-        ) : mode === "source" &&
-          template &&
-          candidateDiscovery.status === "failed" ? null : mode === "source" ? (
+        ) : template && candidateDiscovery.status === "failed" ? null : (
           <TemplateBrowser
+            listSourceAccounts={credentials?.listStoredCredentials}
             client={templates}
             onChooseFolder={desktop.inspectWorkspaceFolder}
             initialSourceUrl={sourceUrl ?? undefined}
@@ -240,6 +204,7 @@ export function WorkspaceChooser() {
             initialInspection={localInspection}
             initialPin={localInspection ? undefined : (template ?? undefined)}
             onCreate={create}
+            onCreateFresh={(name) => create(name)}
             onReviewPending={(approvalId) => {
               void systemWorkspaceId
                 .then((ownerId) => {
@@ -253,36 +218,6 @@ export function WorkspaceChooser() {
                 });
             }}
           />
-        ) : (
-          <Flex direction="column" gap="3">
-            <Text size="2" color="gray">
-              Start with the shared basics and make it your own.
-            </Text>
-            <label>
-              <Text as="div" size="2" weight="medium" mb="2">
-                Workspace name
-              </Text>
-              <TextField.Root
-                size="3"
-                aria-label="Workspace name"
-                placeholder="my-project"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                disabled={busy}
-              />
-            </label>
-            <Text size="1" color="gray">
-              Use letters, numbers, hyphens or underscores.
-            </Text>
-            <Button
-              size="3"
-              loading={busy}
-              disabled={busy || !/^[A-Za-z0-9_-]+$/.test(name.trim())}
-              onClick={() => void create(name.trim())}
-            >
-              Create workspace
-            </Button>
-          </Flex>
         )}
       </Flex>
     </Box>

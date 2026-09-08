@@ -52,6 +52,9 @@ export function WorkspaceCreateSheet({
   const colors = useAtomValue(themeColorsAtom);
   const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
+  const [sourceKind, setSourceKind] = useState<"fresh" | "git">(
+    sourceUrl ? "git" : "fresh",
+  );
   const [url, setUrl] = useState(sourceUrl ?? "");
   const sourceRequest = useRef(0);
   useEffect(
@@ -148,7 +151,7 @@ export function WorkspaceCreateSheet({
       restoring ||
       (!created &&
         (!capturedName ||
-          ((selectedTemplate || url.trim()) && !currentInspection)))
+          ((selectedTemplate || sourceKind === "git") && !currentInspection)))
     )
       return;
     pending.current = true;
@@ -224,7 +227,7 @@ export function WorkspaceCreateSheet({
               accessibilityRole="header"
               style={[type.heading, { flex: 1, color: colors.text }]}
             >
-              New workspace
+              Add workspace
             </Text>
             <IconButton
               icon={X}
@@ -240,7 +243,68 @@ export function WorkspaceCreateSheet({
                 ? "Review this source, then give its new workspace a name. It starts separately from your other workspaces."
                 : "A separate place for a project, with its own panels, agents and basic tools."}
           </Text>
-          {!selectedTemplate && !created && (
+          {!selectedTemplate && !created && !recoveryNotice && (
+            <View
+              accessibilityRole="radiogroup"
+              style={{ flexDirection: "row", gap: spacing.sm }}
+            >
+              {(
+                [
+                  {
+                    value: "fresh",
+                    title: "Start fresh",
+                    detail: "Start with Base",
+                  },
+                  {
+                    value: "git",
+                    title: "Git URL",
+                    detail: "Use a repository",
+                  },
+                ] as const
+              ).map((option) => (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityLabel={option.title}
+                  accessibilityState={{
+                    checked: sourceKind === option.value,
+                    disabled: busy || inspecting,
+                  }}
+                  disabled={busy || inspecting}
+                  onPress={() => setSourceKind(option.value)}
+                  style={{
+                    flex: 1,
+                    borderWidth: 1,
+                    borderColor:
+                      sourceKind === option.value
+                        ? colors.primary
+                        : colors.border,
+                    borderRadius: radius.md,
+                    padding: spacing.md,
+                    minHeight: touchTarget,
+                  }}
+                >
+                  <Text
+                    style={[
+                      type.bodyStrong,
+                      {
+                        color:
+                          sourceKind === option.value
+                            ? colors.primary
+                            : colors.text,
+                      },
+                    ]}
+                  >
+                    {option.title}
+                  </Text>
+                  <Text style={[type.caption, { color: colors.textSecondary }]}>
+                    {option.detail}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+          {!selectedTemplate && !created && sourceKind === "git" && (
             <View style={{ gap: spacing.sm }}>
               <Text style={[type.bodyStrong, { color: colors.text }]}>
                 From a Git URL
@@ -469,7 +533,8 @@ export function WorkspaceCreateSheet({
               (!created &&
                 (!name.trim() ||
                   Boolean(
-                    (selectedTemplate || url.trim()) && !currentInspection,
+                    (selectedTemplate || sourceKind === "git") &&
+                    !currentInspection,
                   )))
             }
             onPress={() => void create()}

@@ -371,14 +371,35 @@ it("replaces a source session on a new link and leaves a local review with Back"
 
 it("reviews picked folder bytes without remote inspection and treats cancellation as no selection", async () => {
   const client = { inspect: vi.fn() };
-  const onChooseFolder = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(inspection);
+  const onChooseFolder = vi
+    .fn()
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce(inspection);
   const onCreate = vi.fn();
-  render(<Theme><TemplateBrowser client={client} onChooseFolder={onChooseFolder} onCreate={onCreate} /></Theme>);
+  render(
+    <Theme>
+      <TemplateBrowser
+        client={client}
+        onChooseFolder={onChooseFolder}
+        onCreate={onCreate}
+      />
+    </Theme>,
+  );
+  fireEvent.click(screen.getByRole("radio", { name: /Folder/ }));
+  expect(screen.queryByText("Start from an example")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Choose folder…" }).getAttribute("disabled")).toBeNull());
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("button", { name: "Choose folder…" })
+        .getAttribute("disabled"),
+    ).toBeNull(),
+  );
   expect(screen.queryByRole("button", { name: "Create workspace" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Create workspace" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Create workspace" }),
+  );
   await waitFor(() => expect(onCreate).toHaveBeenCalledWith("garden", pin));
   expect(client.inspect).not.toHaveBeenCalled();
 });

@@ -921,6 +921,7 @@ export function createShellWorkspaceClient(
     extensionsClient.invoke(extension, method, args),
   );
   const credentials = {
+    listStoredCredentials: () => credentialsClient.listStoredCredentials(),
     requestCredentialInput: (
       input: Parameters<typeof credentialsClient.requestCredentialInput>[0],
     ) => credentialsClient.requestCredentialInput(input),

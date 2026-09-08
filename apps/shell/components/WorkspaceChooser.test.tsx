@@ -186,7 +186,7 @@ describe("WorkspaceChooser", () => {
       new Error("Connection interrupted"),
     );
     draw();
-    fireEvent.click(await screen.findByRole("button", { name: "Start blank" }));
+    fireEvent.click(await screen.findByRole("radio", { name: /Start fresh/ }));
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace name" }), {
       target: { value: "garden" },
     });

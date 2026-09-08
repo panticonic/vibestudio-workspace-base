@@ -200,7 +200,7 @@ it("does not send a supplied pin to remote Git when local discovery fails", asyn
   expect(directory.createWorkspace).not.toHaveBeenCalled();
 });
 
-it("keeps blank workspace creation available when local candidates fail to load", async () => {
+it("keeps fresh workspace creation available when local candidates fail to load", async () => {
   const { directory, view, onCreated } = fixture();
   view.unmount();
   directory.listWorkspaceTemplateCandidates.mockRejectedValueOnce(
@@ -215,6 +215,10 @@ it("keeps blank workspace creation available when local candidates fail to load"
   );
   await local.findByText("Local candidates unavailable");
   fireEvent.changeText(local.getByLabelText("Workspace name"), "Blank board");
+  fireEvent.press(local.getByRole("radio", { name: "Git URL" }));
+  fireEvent.press(local.getByRole("button", { name: "Create workspace" }));
+  expect(directory.createWorkspace).not.toHaveBeenCalled();
+  fireEvent.press(local.getByRole("radio", { name: "Start fresh" }));
   fireEvent.press(local.getByRole("button", { name: "Create workspace" }));
   await waitFor(() => expect(onCreated).toHaveBeenCalled());
   expect(directory.createWorkspace).toHaveBeenCalledWith(

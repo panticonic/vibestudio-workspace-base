@@ -14,6 +14,8 @@ import {
   Heading,
   Text,
   TextField,
+  RadioCards,
+  Select,
 } from "@radix-ui/themes";
 import type {
   TemplateExactPin,
@@ -23,6 +25,9 @@ import type {
 import { sameWorkspaceTemplatePin } from "@vibestudio/service-schemas/templates";
 import { workspaceExamples } from "@workspace/template-management";
 import type { TemplateManagementClient } from "@workspace/template-management";
+
+import type { StoredCredentialSummary } from "@vibestudio/credential-client/types";
+import { findMatchingUrlAudience } from "@vibestudio/credential-client/urlAudience";
 
 type BrowserClient = Pick<TemplateManagementClient, "inspect">;
 export type CreateTemplateWorkspace = (
@@ -192,6 +197,8 @@ interface TemplateBrowserProps {
   candidates?: readonly TemplateInspection[];
   onReviewPending?: (approvalId: string) => void;
   onCreate?: CreateTemplateWorkspace;
+  listSourceAccounts?: () => Promise<StoredCredentialSummary[]>;
+  onCreateFresh?: (name: string) => Promise<void>;
   onChooseFolder?: () => Promise<TemplateInspection | null>;
   onOpenInApp?: (inspection: TemplateInspection) => Promise<void>;
 }
@@ -221,7 +228,29 @@ function WorkspaceSourceSession({
   candidates = [],
   onReviewPending,
   onChooseFolder,
+  onCreateFresh,
+  listSourceAccounts,
 }: TemplateBrowserProps) {
+  const [accounts, setAccounts] = useState<StoredCredentialSummary[]>([]);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!listSourceAccounts) return;
+    let active = true;
+    void listSourceAccounts()
+      .then((value) => {
+        if (active) setAccounts(value);
+      })
+      .catch((error) => {
+        if (active) setAccountError(errorMessage(error));
+      });
+    return () => {
+      active = false;
+    };
+  }, [listSourceAccounts]);
+  const [sourceKind, setSourceKind] = useState("git");
+  const [freshName, setFreshName] = useState("");
+  const [creatingFresh, setCreatingFresh] = useState(false);
+  const freshPending = useRef(false);
   const [error, setError] = useState<unknown>(null);
   const lastLocator = useRef<TemplateLocator | null>(null);
   const review = pendingAuthorityNotice(error);
@@ -285,6 +314,88 @@ function WorkspaceSourceSession({
   })();
   return (
     <Flex direction="column" gap="5">
+      <RadioCards.Root
+        value={sourceKind}
+        onValueChange={setSourceKind}
+        columns={{
+          initial: "1",
+          sm: onChooseFolder && onCreateFresh ? "3" : "2",
+        }}
+        gap="3"
+        aria-label="Workspace starting point"
+        disabled={inspecting || creatingFresh}
+      >
+        {onCreateFresh ? (
+          <RadioCards.Item value="fresh">
+            <Flex direction="column" gap="1">
+              <Text weight="bold">Start fresh</Text>
+              <Text size="2" color="gray">
+                Start with Base
+              </Text>
+            </Flex>
+          </RadioCards.Item>
+        ) : null}
+        {onChooseFolder ? (
+          <RadioCards.Item value="folder">
+            <Flex direction="column" gap="1">
+              <Text weight="bold">Folder</Text>
+              <Text size="2" color="gray">
+                Use a local checkout
+              </Text>
+            </Flex>
+          </RadioCards.Item>
+        ) : null}
+        <RadioCards.Item value="git">
+          <Flex direction="column" gap="1">
+            <Text weight="bold">Git URL</Text>
+            <Text size="2" color="gray">
+              Use a repository
+            </Text>
+          </Flex>
+        </RadioCards.Item>
+      </RadioCards.Root>
+      {sourceKind === "fresh" && onCreateFresh ? (
+        <Flex direction="column" gap="3">
+          <Text size="2" color="gray">
+            A separate workspace using this host’s configured Base, with its own
+            data and panels.
+          </Text>
+          <TextField.Root
+            aria-label="Workspace name"
+            placeholder="my-project"
+            value={freshName}
+            disabled={creatingFresh}
+            onChange={(event) => setFreshName(event.target.value)}
+            size="3"
+          />
+          <Text size="1" color="gray">
+            Use letters, numbers, hyphens or underscores.
+          </Text>
+          <Box>
+            <Button
+              size="3"
+              loading={creatingFresh}
+              disabled={
+                creatingFresh || !/^[A-Za-z0-9_-]+$/.test(freshName.trim())
+              }
+              onClick={() => {
+                if (freshPending.current) return;
+                freshPending.current = true;
+                setCreatingFresh(true);
+                setError(null);
+                void onCreateFresh(freshName.trim())
+                  .catch(setError)
+                  .finally(() => {
+                    freshPending.current = false;
+                    setCreatingFresh(false);
+                  });
+              }}
+            >
+              Create workspace
+            </Button>
+          </Box>
+        </Flex>
+      ) : null}
       {error ? (
         <Callout.Root
           color={awaitingReview ? "amber" : "red"}
@@ -348,22 +459,43 @@ function WorkspaceSourceSession({
           ) : null}
         </Card>
       ) : null}
-      {onChooseFolder ? (
+      {onChooseFolder && sourceKind === "folder" ? (
         <Flex direction="column" gap="2">
           <Heading size="3">From a folder on this computer</Heading>
-          <Text size="2" color="gray">Use a workspace folder, including changes you haven’t committed.</Text>
+          <Text size="2" color="gray">
+            Use a workspace folder, including changes you haven’t committed.
+          </Text>
           <Box>
-            <Button size="3" variant="soft" disabled={inspecting} loading={inspecting} onClick={() => {
-              const operation = ++generation.current;
-              setInspecting(true); setError(null);
-              void onChooseFolder().then(result => {
-                if (live.current && operation === generation.current && result) setInspection(result);
-              }).catch(error => {
-                if (live.current && operation === generation.current) setError(error);
-              }).finally(() => {
-                if (live.current && operation === generation.current) setInspecting(false);
-              });
-            }}>Choose folder…</Button>
+            <Button
+              size="3"
+              variant="soft"
+              disabled={inspecting}
+              loading={inspecting}
+              onClick={() => {
+                const operation = ++generation.current;
+                setInspecting(true);
+                setError(null);
+                void onChooseFolder()
+                  .then((result) => {
+                    if (
+                      live.current &&
+                      operation === generation.current &&
+                      result
+                    )
+                      setInspection(result);
+                  })
+                  .catch((error) => {
+                    if (live.current && operation === generation.current)
+                      setError(error);
+                  })
+                  .finally(() => {
+                    if (live.current && operation === generation.current)
+                      setInspecting(false);
+                  });
+              }}
+            >
+              Choose folder…
+            </Button>
           </Box>
         </Flex>
       ) : null}
@@ -394,78 +526,123 @@ function WorkspaceSourceSession({
           </Grid>
         </Flex>
       ) : null}
-      <Flex direction="column" gap="3">
-        <Flex justify="between" align="center">
-          <Heading size="3">From a source address</Heading>
-        </Flex>
-        <TextField.Root
-          size="3"
-          aria-label="Workspace source address"
-          placeholder="https://github.com/owner/workspace"
-          value={url}
-          onChange={(event) => setUrl(event.target.value)}
-          disabled={inspecting}
-        />
-        <details>
-          <summary
-            style={{
-              fontSize: 13,
-              cursor: "pointer",
-              minHeight: 44,
-              alignContent: "center",
-            }}
-          >
-            Private repository?
-          </summary>
+      {sourceKind === "git" ? (
+        <Flex direction="column" gap="3">
+          <Flex justify="between" align="center">
+            <Heading size="3">From a source address</Heading>
+          </Flex>
           <TextField.Root
             size="3"
-            aria-label="Connected account name"
-            placeholder="Connected account name"
-            value={credential}
-            onChange={(event) => setCredential(event.target.value)}
+            aria-label="Workspace source address"
+            placeholder="https://github.com/owner/workspace"
+            value={url}
+            onChange={(event) => {
+              setUrl(event.target.value);
+              setCredential("");
+            }}
+            disabled={inspecting}
           />
-          <Text as="p" size="1" color="gray" mt="1">
-            Use the name of an account already connected for this repository.
-          </Text>
-        </details>
-        <Flex justify="end">
-          <Button
-            size="3"
-            variant="soft"
-            disabled={!canInspect || inspecting}
-            loading={inspecting}
-            onClick={() =>
-              void inspect({
-                url: url.trim(),
-                ...(credential.trim() ? { credential: credential.trim() } : {}),
-              })
-            }
-          >
-            Review workspace
-          </Button>
-        </Flex>
-      </Flex>
-      <Flex direction="column" gap="3">
-        <Heading size="3">Start from an example</Heading>
-        <Grid columns={{ initial: "1", sm: "2" }} gap="3">
-          {workspaceExamples.map((entry) => (
-            <Card key={entry.url}>
-              <Heading size="3">{entry.name}</Heading>
-              <Text as="p" size="2" color="gray" mt="2">
-                {entry.description}
+          {listSourceAccounts ? (
+            <Flex direction="column" gap="2">
+              <Text size="2" weight="medium">
+                Repository access
               </Text>
-              <Button
-                mt="3"
-                variant="soft"
+              <Select.Root
+                value={credential || "anonymous"}
+                onValueChange={(value) =>
+                  setCredential(value === "anonymous" ? "" : value)
+                }
                 disabled={inspecting}
-                onClick={() => void inspect({ url: entry.url })}
               >
-                Review {entry.name}
-              </Button>
-            </Card>
-          ))}
-        </Grid>
-      </Flex>
+                <Select.Trigger
+                  aria-label="Repository account"
+                  placeholder="Public repository"
+                />
+                <Select.Content>
+                  <Select.Item value="anonymous">
+                    Public repository — no account
+                  </Select.Item>
+                  {accounts
+                    .filter((account) => {
+                      if (
+                        account.revokedAt ||
+                        account.lifecycle.state === "revoked"
+                      )
+                        return false;
+                      try {
+                        return account.bindings?.some(
+                          (binding) =>
+                            binding.use === "git-http" &&
+                            !!findMatchingUrlAudience(
+                              new URL(url.replace(/^git\+/, "")),
+                              binding.audience,
+                            ),
+                        );
+                      } catch {
+                        return false;
+                      }
+                    })
+                    .map((account) => (
+                      <Select.Item key={account.id} value={account.label}>
+                        {account.label}
+                      </Select.Item>
+                    ))}
+                </Select.Content>
+              </Select.Root>
+              <Text size="1" color="gray">
+                For a private repository, choose a connected account that can
+                access this address.
+              </Text>
+              {accountError ? (
+                <Text size="2" color="red" role="alert">
+                  Couldn’t load connected accounts: {accountError}
+                </Text>
+              ) : null}
+            </Flex>
+          ) : null}
+          <Flex justify="end">
+            <Button
+              size="3"
+              variant="soft"
+              disabled={!canInspect || inspecting}
+              loading={inspecting}
+              onClick={() =>
+                void inspect({
+                  url: url.trim(),
+                  ...(credential.trim()
+                    ? { credential: credential.trim() }
+                    : {}),
+                })
+              }
+            >
+              Review workspace
+            </Button>
+          </Flex>
+        </Flex>
+      ) : null}
+      {sourceKind === "git" ? (
+        <Flex direction="column" gap="3">
+          <Heading size="3">Start from an example</Heading>
+          <Grid columns={{ initial: "1", sm: "2" }} gap="3">
+            {workspaceExamples.map((entry) => (
+              <Card key={entry.url}>
+                <Heading size="3">{entry.name}</Heading>
+                <Text as="p" size="2" color="gray" mt="2">
+                  {entry.description}
+                </Text>
+                <Button
+                  mt="3"
+                  variant="soft"
+                  disabled={inspecting}
+                  onClick={() => void inspect({ url: entry.url })}
+                >
+                  Review {entry.name}
+                </Button>
+              </Card>
+            ))}
+          </Grid>
+        </Flex>
+      ) : null}
     </Flex>
   );
 }
