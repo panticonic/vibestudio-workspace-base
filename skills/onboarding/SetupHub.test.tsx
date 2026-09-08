@@ -452,7 +452,7 @@ describe("SetupHub", () => {
         },
       ),
     );
-    const interaction = send.mock.calls[0]?.[1]?.metadata?.interaction;
+    const interaction = send.mock.calls[0]?.[1]?.metadata?.["interaction"];
     expect(resolveOnboardingTemplateSelection(interaction)).toEqual({
       ownerSkillPath: "skills/templates/SKILL.md",
       selection,
