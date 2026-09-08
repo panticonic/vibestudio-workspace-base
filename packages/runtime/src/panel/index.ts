@@ -104,6 +104,7 @@ export const gad = defaultMember("gad");
 export const blobstore = defaultMember("blobstore");
 export const images = defaultMember("images");
 export const workspace = defaultMember("workspace");
+export const workspaces = defaultMember("workspaces");
 export const runtime = defaultMember("runtime");
 export const credentials = defaultMember("credentials");
 export const browserData = defaultMember("browserData");

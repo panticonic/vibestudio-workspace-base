@@ -192,6 +192,7 @@ export const gad = runtimeMember("gad");
 export const blobstore = runtimeMember("blobstore");
 export const images = runtimeMember("images");
 export const workspace = runtimeMember("workspace");
+export const workspaces = runtimeMember("workspaces");
 export const runtime = runtimeMember("runtime");
 export const credentials = runtimeMember("credentials");
 export const browserData = runtimeMember("browserData");

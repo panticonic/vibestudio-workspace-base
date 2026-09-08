@@ -6,12 +6,11 @@ RPC methods, envelopes, streams, cancellation, and receiver contracts are shared
 Do not add a website proxy, bearer-token bootstrap, alternate credential route,
 or a reduced parallel API to make a call work.
 
-This integration is still being implemented. Desktop explicit connection and
-ordinary RPC have initial native acceptance coverage. Mobile document hosting,
-the full endpoint/resource review, website conversation privacy, queued/event and
-cross-workspace lifetime propagation, website-to-hub creation, and the complete
-reviewed Pages publication workflow are not yet accepted. Consult the live method
-contract and the Host implementation plan before promising those operations.
+Desktop and mobile use native document hosting with a shared provider contract.
+Android compiles and the focused document-lifecycle tests pass; iOS still requires
+macOS compilation and device acceptance. The complete endpoint/resource audit and
+reviewed Pages publication acceptance are not complete. Consult live contracts
+before promising an operation.
 
 ## Start with zero workspace access
 
@@ -122,5 +121,17 @@ publication workflow remains unfinished.
 
 For template offers and exact-source inspection, see [templates](../templates/SKILL.md).
 A template link opens trusted review; it grants no website workspace access.
-The source-attested website creation RPC is not yet available. Do not call a
-native account endpoint with invented account, owner, or destination identities.
+Panels, workers and connected websites share `workspaces.create(input)` and
+`workspaces.receipt({ operationId })` from `@workspace/runtime`. Inspect a source
+with `templates.inspect()` first and pass its exact pin as `rootTemplate`, with
+`workspace` and a durable `operationId`. Persist the ID and exact input before
+submitting. On an uncertain result, read the receipt using that same ID; never
+mint another ID merely because a page reloaded. A null receipt allows retrying
+the original exact request. A deleted receipt is final, not permission to recreate.
+
+The caller does not supply account, source workspace or requester identity. The
+host attests those facts. Website receipts survive document replacement in the
+same authenticated user/workspace/origin scope, after fresh connection and normal
+receipt authorization. They convey no routing credentials or access to the new
+workspace. Ordinary panels and workers use their authenticated runtime identity.
+Trusted creation links and programmatic creation use the same hub lifecycle owner.

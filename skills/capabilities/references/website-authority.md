@@ -64,20 +64,22 @@ The approval explains the resource, effect, result disclosure, and offered
 lifetime. Detailed identity evidence may include the source workspace,
 initiating document, and reviewed receiver/requester version when available.
 
-An approved receiver can use its own scoped authority for its declared effect.
-Keep the initiating website's attribution, method ceiling, and live execution
-through the downstream call. Do not substitute website grants for receiver
-grants, erase website provenance, or let a receiver become an arbitrary proxy.
-Never use detached work to outlive the original admission. Queued agents,
-events, cross-workspace propagation, and all streaming paths still require
-completion of the website lifetime audit.
+Connecting a website is a trust decision about mutable website code. A reviewed
+receiver performs an approved operation under its normal implementation authority.
+Website attribution helps review and audit; it is not a permanent ownership or
+security label on conversations, data, agent turns, queues, or downstream effects.
+Transparent forwarding must not bypass the website's entry restrictions, but the
+system does not promise to confine a trusted receiver's entire implementation to
+website grants.
 
-A private RPC response does not make retained workspace data private. Place
-private conversations, transcripts, tool logs, and retained results in the
-appropriate private workspace, or explicitly review disclosure to the shared
-workspace audience before retention. “Website-owned” is not a storage boundary.
-The website conversation placement/retention API remains unfinished; do not
-promise private chat by writing to an ordinary shared workspace conversation.
+Conversations initiated by websites are ordinary conversations in the connected
+workspace. Transcripts, tool logs, sharing and retention follow that workspace's
+normal rules. A private live RPC reply does not establish private retained storage.
+Use a private workspace when the user wants private workspace data.
+
+Disconnect retires new website calls and live result delivery. It does not undo
+completed changes or automatically cancel work already accepted by a service.
+Long-running operations use their owner's explicit cancellation and receipt APIs.
 
 ## Diagnose instead of widening
 

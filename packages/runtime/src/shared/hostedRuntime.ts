@@ -1,4 +1,8 @@
 import {
+  createWorkspaceCreationClient,
+  type WorkspaceCreationClient,
+} from "@vibestudio/service-schemas/clients/workspaceCreationClient";
+import {
   createTemplateManagementClient,
   type TemplateManagementClient,
 } from "@workspace/template-management";
@@ -131,6 +135,7 @@ export interface WorkspaceRuntime {
   readonly blobstore: BlobstoreClient;
   readonly images: ImagesClient;
   readonly workspace: WorkspaceClient;
+  readonly workspaces: WorkspaceCreationClient;
   readonly runtime: RuntimeServiceClient;
   readonly credentials: CredentialClient;
   readonly browserData: BrowserDataClient;
@@ -347,6 +352,10 @@ export function createHostedRuntime(host: RuntimeHost): WorkspaceRuntime {
     createBlobstoreClient(rpc, host.fs),
   );
   const workspace = helpfulNamespace("workspace", createWorkspaceClient(rpc));
+  const workspaces = helpfulNamespace(
+    "workspaces",
+    createWorkspaceCreationClient(rpc),
+  );
   const runtimeService = helpfulNamespace(
     "runtime",
     createLazyTypedServiceClient(
@@ -401,6 +410,7 @@ export function createHostedRuntime(host: RuntimeHost): WorkspaceRuntime {
     blobstore,
     images: helpfulNamespace("images", createImagesClient(rpc)),
     workspace,
+    workspaces,
     runtime: runtimeService,
     credentials,
     browserData,

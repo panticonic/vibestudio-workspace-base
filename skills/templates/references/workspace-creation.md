@@ -66,6 +66,40 @@ review. Creation consumes that inspected pin. It does not re-resolve a moving
 branch after review. The new workspace may then need ordinary unit/authority
 review before its initial panels run.
 
+## Create from a panel, worker, or connected website
+
+Use the shared runtime clients. Websites must first complete explicit workspace
+connection; installed panels and workers use their ordinary admitted runtime.
+
+```ts
+import { templates, workspaces } from "@workspace/runtime";
+
+const inspected = await templates.inspect({ url: "https://github.com/owner/workspace" });
+// Retain this exact request in caller-scoped durable storage before submitting.
+const request = {
+  operationId: crypto.randomUUID(),
+  workspace: "My app",
+  rootTemplate: inspected.pin,
+};
+const receipt = await workspaces.create(request);
+```
+
+On an uncertain submission, reconnect if necessary and call
+`workspaces.receipt({ operationId: request.operationId })`. A receipt identifies
+the existing result; a null receipt permits resubmitting the original request.
+Never generate a new operation ID as a network retry. A deleted result stays
+deleted. Changed input needs a deliberately new operation after resolving the
+previous submission.
+
+The hub owns creation, initial membership and receipts for both links and RPC.
+It derives the account and source identity from authenticated host evidence;
+callers cannot choose them. Website receipt ownership is stable across fresh
+documents for the same user, source workspace and origin, while each delivery
+requires current connection and permission. Panels and workers use their
+concrete authenticated runtime identity. Receipts contain no routing credential
+or authority to inspect the created workspace; opening remains a separate
+trusted workspace action.
+
 ## Outcomes and recovery
 
 - A failed inspection creates no workspace. Report the concrete source or
