@@ -72,12 +72,7 @@ template:
     - workers/testkit-driver
     - workers/workspace-presentation
     - workers/workspace-source
-  files:
-    - .ignore
-    - .gitattributes
-    - package.json
-    - types/assets.d.ts
-    - tsconfig.json
+  files: []
 systemEpoch: 0
 defaultRepo: projects/default
 defaultAgentConfig:
