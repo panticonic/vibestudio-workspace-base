@@ -132,7 +132,6 @@ template:
     - .gitattributes
     - package.json
     - tests/distributions/browser-data-onboarding.integration.test.ts
-    - tests/helpers/ledgerTest.ts
     - types/assets.d.ts
     - tsconfig.integration.json
     - tsconfig.integration.mobile.json
