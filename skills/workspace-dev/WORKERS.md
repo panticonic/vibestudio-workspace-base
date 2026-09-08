@@ -432,6 +432,7 @@ export class TodoStore extends DurableObjectBase {
   }
 
   @rpc({
+    website: { kind: "closed", reason: "Todo data is private to the installed app." },
     principals: ["user", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -458,6 +459,7 @@ export class TodoStore extends DurableObjectBase {
   }
 
   @rpc({
+    website: { kind: "closed", reason: "Todo data is private to the installed app." },
     principals: ["user", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -679,6 +681,7 @@ RPC call:
 
 ```ts
 @rpc({
+  website: { kind: "closed", reason: "This integration is restricted to explicitly authorized workspace callers." },
   principals: ["code"],
   effect: { kind: "open" },
   tier: "open",
@@ -818,6 +821,7 @@ Bind a Durable Object receiver to a provided unit-local name:
 
 ```ts
 @rpc({
+  website: { kind: "closed", reason: "This integration is restricted to explicitly authorized workspace callers." },
   principals: ["code"],
   effect: {
     kind: "userland-capability",
