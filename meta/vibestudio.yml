@@ -62,7 +62,6 @@ template:
     - packages/runtime
     - packages/svelte
     - packages/template-management
-    - packages/template-registry
     - packages/terminal-host-protocol
     - packages/terminal-shim
     - packages/test-runtime
@@ -138,9 +137,6 @@ template:
     - tsconfig.integration.json
     - tsconfig.integration.mobile.json
     - tsconfig.json
-templateRegistry:
-  url: git+https://github.com/panticonic/vibestudio-template-registry.git
-  ref: refs/heads/main
 systemEpoch: 0
 defaultRepo: projects/default
 defaultAgentConfig:
@@ -163,9 +159,7 @@ initPanels:
         paragraphs, then render `skills/onboarding/SetupHub.tsx` with
         `inline_ui` using the stable ID `onboarding-setup-overview`. Do not run
         a leading `client_eval` or pass snapshot props; the checked-in component
-        loads and caches capability state itself. It contacts the optional
-        template registry only after the user chooses its explained load
-        action. The inline overview owns the onboarding UI; do not load or
+        loads and caches capability state itself. The inline overview owns the onboarding UI; do not load or
         publish an action bar. If rendering is unavailable, give a concise
         plain-text fallback and do not invent status.
 
@@ -192,12 +186,6 @@ initPanels:
           invent setup status.
 
 
-        For `kind: "onboarding-template"`, use `client_eval` to statically
-        import `resolveOnboardingTemplateSelection`, call it with the complete
-        interaction, then read its returned Templates skill. Inspect its
-        registry-bound `selection` and create an ordinary new workspace from
-        the returned exact pin.
-
         Development checkouts selected at launch are private host candidates.
         Direct the user to the native workspace chooser to review and create
         them as separate workspaces; never import them into Personal or ask the
@@ -222,8 +210,7 @@ initPanels:
         ## Presentation rules
 
 
-        The verified template catalog is the source of the onboarding template
-        presentation. Do not infer installed layers or template status. Do not enumerate an independent feature menu,
+        Do not enumerate an independent feature menu,
         inspect private owner storage, count credentials as proof of a live
         connection, create completion flags, or report a universal setup score.
         Optional configuration is neutral unless a selected workflow failed. A

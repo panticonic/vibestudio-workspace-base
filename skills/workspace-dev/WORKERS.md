@@ -52,6 +52,7 @@ Generated from `runtimeSurface.worker.ts`. Use `await help()` at runtime for the
 | `blobstore` | namespace | `has`, `stat`, `putText`, `getText`, `getRange`, `getRangeBytes`, `grep`, `putBase64`, `putRetained`, `retain`, `releaseRetention`, `getBase64`, `putTree`, `getTree`, `listTree`, `readFileAtTree`, `diffTrees`, `materializeTree`, `delete`, `list`, `putBytes`, `getBytes`, `readText` | Per-workspace content-addressable blob store: putText/putBase64 store, getText/readText/getRange/getRangeBytes/getBase64 fetch, grep searches; returns a sha256 digest. readText is a portable alias of getText and both return string \| null. Runtime-only putBytes(Uint8Array \| ArrayBuffer) and getBytes(digest) losslessly bridge the wire's base64 representation; MIME metadata is not stored. Persist large artifacts/screenshots and return the digest. Immutable file trees: putTree/getTree store and read tree objects, listTree/readFileAtTree walk a tree hash, diffTrees compares two trees. |
 | `webhooks` | namespace | `createSubscription`, `listSubscriptions`, `revokeSubscription`, `rotateSecret` | Ergonomic owner-scoped webhook lifecycle, identical in panels, workers, DOs, and agent eval: createSubscription(request), listSubscriptions(), rotateSecret(subscriptionId, secret?), and revokeSubscription(subscriptionId). Each subscription has an explicit maxBodyBytes budget: relay defaults to its 1,500,000-byte transport ceiling, while direct defaults to the operator-configured host ceiling (16 MiB by default). Delivery events currently include rawBodyBase64, so the host ceiling also bounds that in-memory expansion. Agent eval delegates ownership and target-source checks to its host-verified owning runtime. Secrets are redacted from listings. |
 | `extensions` | namespace | `use`, `invoke`, `invokeProvider`, `on` |  |
+| `templates` | namespace | `inspect`, `inspectAuthoring`, `authoringParts`, `publishAuthoring` | Exact workspace-source inspection and publication through the admitted template receiver. |
 | `notifications` | namespace | `show`, `dismiss` |  |
 | `services` | value |  | Portable dynamic service namespace. Rich runtime clients are available by name; other services dispatch through the caller-scoped main service boundary. The same client is available in panels, workers, Durable Objects, and eval. |
 | `hosts` | value |  | Portable owner-scoped attached-host access for development sessions. |
@@ -387,7 +388,7 @@ Canonical shape:
    together with its panel via `createProjects`).
 2. Store durable rows in the DO's SQLite database through `this.sql`.
 3. Expose narrow app methods with explicit
-   `@rpc({ principals, effect: { kind: "open" }, tier, sensitivity })`
+   `@rpc({ website, principals, effect: { kind: "open" }, tier, sensitivity })`
    contracts; the effect must be a literal object so the exact build can document it
    without executing provider code. Do not expose a
    raw SQL console to normal UI callers.
@@ -653,10 +654,10 @@ export class MyStoreDO extends DurableObjectBase {
     return { version: 1, name: "my-store-v1" } as const;
   }
 
-  @rpc({ principals: ["user", "code"], effect: { kind: "open" }, tier: "open", sensitivity: "write" })
+  @rpc({ website: { kind: "closed", reason: "Workspace data is not exposed to websites." }, principals: ["user", "code"], effect: { kind: "open" }, tier: "open", sensitivity: "write" })
   async addItem(label: string): Promise<{ id: string }> { ... }
 
-  @rpc({ principals: ["host"], effect: { kind: "open" }, tier: "open", sensitivity: "write" })
+  @rpc({ website: { kind: "closed", reason: "Host lifecycle traffic is not exposed to websites." }, principals: ["host"], effect: { kind: "open" }, tier: "open", sensitivity: "write" })
   async onWebhookDelivery(event: WebhookEvent): Promise<void> { ... }
 
   private bumpCounter(): void { ... }       // no @rpc — unreachable over RPC
@@ -668,6 +669,32 @@ agents, and `host` only for trusted host lifecycle traffic. Listing a principal 
 only the receiver floor: the caller's sealed manifest, live grant, mission/context
 constraints, and service admission still have to agree.
 
+Methods are local to their workspace unless the exact declaration also sets
+`crossWorkspace: true`. A foreign caller selects the destination on the ordinary
+RPC call:
+
+```ts
+@rpc({
+  principals: ["code"],
+  effect: { kind: "open" },
+  tier: "open",
+  sensitivity: "read",
+  crossWorkspace: true,
+})
+async listAvailableSlots(): Promise<string[]> { ... }
+
+const slots = await rpc.call(storeTargetId, "listAvailableSlots", [], {
+  destination: { kind: "workspace", workspaceId: personalWorkspaceId },
+});
+```
+
+This declaration only exposes the receiver. The user's governing outgoing and
+incoming workspace policies must both admit the exact destination, target and
+method before any ordinary service or capability approval is considered. System
+does not accept cross-workspace application ingress. Do not add a second export
+manifest, copy a remote handle into the local workspace, or use a context ID as
+a workspace selector.
+
 ### Identity-level tightening (inline)
 
 The kind floor is coarse — _any_ DO is `"do"`. When a method must accept only ONE
@@ -676,7 +703,7 @@ class), add an inline check ON TOP of the floor using the server-authenticated
 caller, which cannot be forged:
 
 ```ts
-@rpc({ principals: ["code"], effect: { kind: "open" }, tier: "open", sensitivity: "write" })
+@rpc({ website: { kind: "closed", reason: "Internal agent callbacks are not exposed to websites." }, principals: ["code"], effect: { kind: "open" }, tier: "open", sensitivity: "write" })
 async onChannelOp(channelId: string): Promise<void> {
   await this.assertOwnEvalCaller(channelId); // only THIS agent's own EvalDO
   ...
