@@ -15,7 +15,7 @@ The native host owns:
 
 - `vibestudio://connect` and `https://vibestudio.app/p#...` clean-install pairing
 - Iroh Endpoint secret and shell credential persistence in OS-backed secure storage
-- `/auth/mobile-app-bootstrap` over the active Iroh connection
+- `auth.getMobileAppBootstrap` over the authenticated Iroh RPC session
 - streamed bundle writes from JS (`appendBundleChunk` / `finalizeBundleWrite`)
 - integrity verification
 - writing the bundle to native-owned storage
@@ -69,7 +69,7 @@ Clean install:
 6. Native stores its Endpoint secret, the returned device credential, and the
    durable hub-control reach.
 7. JS calls `hubControl.ensureUserWorkspaces`, routes the authenticated user's
-   System workspace, and fetches `/auth/mobile-app-bootstrap` there over Iroh.
+   System workspace, and calls `auth.getMobileAppBootstrap` there over Iroh.
 8. JS streams the chosen platform artifact to native chunk-by-chunk.
 9. Native verifies the decompressed bundle integrity, writes it to disk, and
    reloads into the workspace app.
@@ -87,7 +87,7 @@ Already paired:
 
 ## Bootstrap Payload
 
-`/auth/mobile-app-bootstrap` returns:
+`auth.getMobileAppBootstrap` returns:
 
 - `appId`
 - `buildKey`

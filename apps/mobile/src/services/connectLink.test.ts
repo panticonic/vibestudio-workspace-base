@@ -12,16 +12,14 @@ import {
 
 const storage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 
-// A structurally-valid compact-v3 pairing link (scheme carrier). `exp` is required —
-// pairing links expire — and is kept relative to now so the fixture cannot
-// start failing on a fixed date.
-const CODE = "abcdefghijklmnopqrstuvwxyzABCDEF";
+// A structurally valid current compact pairing link (scheme carrier). Expiry is
+// server-authoritative and deliberately is not client-controlled link material.
+const CODE = "A".repeat(22);
 const VALID_LINK = createConnectDeepLink({
   endpointId: "a".repeat(64),
   relays: ["https://relay.example/"],
   code: CODE,
   v: PAIRING_PROTOCOL_VERSION,
-  exp: Date.now() + 10 * 60 * 1000,
 });
 
 describe("connectLink", () => {
@@ -46,7 +44,7 @@ describe("connectLink", () => {
   });
 
   describe("parseConnectLink (shared parser re-export)", () => {
-    it("parses a valid compact-v4 link", () => {
+    it("parses a valid compact-v5 link", () => {
       const parsed = parseConnectLink(VALID_LINK);
       expect(parsed.kind).toBe("ok");
     });
