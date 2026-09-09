@@ -99,6 +99,7 @@
     "@workspace/runtime": "workspace:*"
   },
   "devDependencies": {
+    "@vibestudio/rpc": "workspace:*",
     "@vibestudio/shared": "workspace:*",
     "vitest": "^3.2.7"
   }
