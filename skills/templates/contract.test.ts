@@ -23,6 +23,7 @@ describe("templates skill public contract", () => {
       "inspect",
       "inspectAuthoring",
       "publishAuthoring",
+      "resolveSource",
     ]);
     for (const name of Object.keys(templatesMethods) as Array<
       keyof typeof templatesMethods

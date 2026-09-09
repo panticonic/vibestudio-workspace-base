@@ -3,6 +3,11 @@
   "service": "@workspace-extensions/templates",
   "source": "extensions/templates",
   "methods": {
+    "resolveSource": {
+      "arguments": ["{ url, credential? }"],
+      "returns": "WorkspaceTemplatePin",
+      "sensitivity": "read"
+    },
     "inspect": {
       "arguments": ["{ pin } | { url, credential? }"],
       "returns": "{ pin, presentation?, repositories, files }",
