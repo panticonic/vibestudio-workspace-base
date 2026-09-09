@@ -1229,7 +1229,10 @@ describe("ApprovalSheet", () => {
     expect(
       getByTestId("approval-action-version").props.accessibilityLabel,
     ).toContain("Remember for this version");
-    expect(getByTestId("approval-action-version").props.style).toEqual(
+    // The danger tone marks the recommended decision, which for this approval is
+    // to allow once: reusing a severe context boundary is no longer recommended,
+    // so the reuse actions render in the neutral tone beside it.
+    expect(getByTestId("approval-action-once").props.style).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           backgroundColor: "#ff7b72",
