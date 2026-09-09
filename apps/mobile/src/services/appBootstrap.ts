@@ -20,7 +20,7 @@ export async function ensureNativeWorkspaceAppBundle(
 ): Promise<{ reloading: boolean }> {
   let activated = false;
   const bundleTransport: BundleDeliveryTransport = {
-    streamReadable: transport.streamReadable.bind(transport),
+    rpc: transport,
     waitUntilConnected: transport.waitUntilConnected.bind(transport),
     close: transport.close.bind(transport),
   };

@@ -85,12 +85,12 @@ const storedCredential: StoredRoutedMobileConnection = {
   controlPairing: {
     endpointId: "aa".repeat(32),
     relays: ["https://relay.example/"],
-    v: 4,
+    v: 5,
   },
   workspacePairing: {
     endpointId: "bb".repeat(32),
     relays: ["https://relay.example/"],
-    v: 4,
+    v: 5,
   },
   selectedWorkspaceId: "ws-a",
   pairedAt: 123,
