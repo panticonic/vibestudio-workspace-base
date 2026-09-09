@@ -71,6 +71,7 @@ Generated from `runtimeSurface.panel.ts`. Use `await help()` at runtime for the 
 | `hosts` | value |  | Portable owner-scoped attached-host access for development sessions. |
 | `runtime` | value |  | Portable typed runtime lifecycle and supervision client for the current workspace context. |
 | `isRpcConnectionLost` | value |  | Recognize a retired or disconnected RPC session. |
+| `createConversationClient` | value |  | Bind a conversation client to an explicit RPC client. A module-level factory, not a runtime instance member. |
 | `createPanelRuntime` | value |  | Create the complete panel API with explicit transport, bootstrap, presentation inputs and lifetime ownership. No injected globals are required. |
 | `connectWorkspace` | value |  | Explicitly ask the presentation host to connect this website to its workspace, then bind the same runtime API used by installed panels. Calls never connect implicitly. |
 | `disconnectWorkspace` | value |  | Disconnect this document and retire its RPC calls, streams and borrowed clients. |
