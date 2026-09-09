@@ -1493,8 +1493,9 @@ describe("AgentVesselBase activation-local inspection", () => {
 
     expect(rpcMethodAuthority(vessel, "readAgentInspection")).toMatchObject({
       website: {
-        kind: "eligible",
-        rationale: "Explicit website receiver policy for this fixture.",
+        kind: "closed",
+        reason:
+          "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
       } as const,
       principals: ["host", "code"],
       effect: { kind: "open" },
