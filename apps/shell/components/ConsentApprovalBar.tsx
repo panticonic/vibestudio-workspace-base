@@ -590,9 +590,11 @@ export function ConsentApprovalBar({
     approval: PendingApproval,
     error: unknown,
   ) => {
-    console.error("[ConsentApprovalBar] approval action failed:", error);
     const controller = approvalController.current;
-    if (!controller) return;
+    if (!controller) {
+      console.error("[ConsentApprovalBar] approval action failed:", error);
+      return;
+    }
     await controller.refresh("manual");
     if (approvalController.current !== controller) return;
     // A denied decision can also mean the request was withdrawn or membership
@@ -602,11 +604,21 @@ export function ConsentApprovalBar({
         (item) => item.approvalId === approval.approvalId,
       )
     ) {
+      console.error("[ConsentApprovalBar] approval action failed:", error);
       setDecisionError({
         approvalId: approval.approvalId,
         message: error instanceof Error ? error.message : String(error),
       });
+      return;
     }
+    // The request is gone from the authoritative queue, which is the outcome
+    // this reconciliation exists to reach: someone else resolved it, or it was
+    // withdrawn. Reporting that as a failure describes a race the user already
+    // won, and nothing is left for anyone to act on.
+    console.info(
+      "[ConsentApprovalBar] approval already resolved elsewhere; queue reconciled:",
+      error instanceof Error ? error.message : String(error),
+    );
   };
   // Diff-review escape hatch: reuse Workspace History if one exists
   // (navigate it to the new target + focus), otherwise create one. The target

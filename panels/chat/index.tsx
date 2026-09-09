@@ -56,6 +56,7 @@ import {
   type DefaultAgentConfig,
   type ModelSettingsSnapshot
 } from "@workspace/model-catalog/catalog";
+import { isRpcAborted } from "@vibestudio/rpc";
 import { isReviewPending } from "@vibestudio/shared/authority/reviewPending";
 import type { LocalModelsCapabilities, ServerKind } from "@workspace/model-catalog/localModels";
 import type { DurableObjectServiceClient } from "@workspace/runtime";
@@ -840,6 +841,10 @@ export default function ChatPanel() {
           // The review event is the fast path. This quiet reconciliation retry
           // covers a panel that mounted after the event or briefly lost its
           // event watch, without producing a retry/log storm.
+        } else if (isRpcAborted(err)) {
+          // The panel superseded its own request. Nothing failed and the retry
+          // below is ordinary reconciliation, so this is not a warning.
+          console.info("[ChatPanel] model settings request superseded; reloading");
         } else {
           console.warn("[ChatPanel] Failed to load model settings; retrying:", err);
         }
