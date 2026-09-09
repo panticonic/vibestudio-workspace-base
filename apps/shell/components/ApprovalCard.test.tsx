@@ -373,16 +373,20 @@ describe("ApprovalCard", () => {
       .closest(".approval-card") as HTMLElement;
     expect(card.getAttribute("data-approval-tone")).toBe("red");
 
-    const trustButton = screen
-      .getByText("Remember for this version")
-      .closest("button");
-    expect(trustButton?.getAttribute("data-accent-color")).toBe("red");
+    // A severe capability accents its recommended action by how much authority
+    // that action grants: the narrow one-shot -- the recommendation here --
+    // reads amber, while a standing version grant would read red. Unrecommended
+    // actions carry no accent at all.
     expect(
       screen
         .getByText("Allow once")
         .closest("button")
         ?.getAttribute("data-accent-color"),
-    ).toBe("");
+    ).toBe("amber");
+    const trustButton = screen
+      .getByText("Remember for this version")
+      .closest("button");
+    expect(trustButton?.getAttribute("data-accent-color")).toBe("");
     fireEvent.click(trustButton as HTMLButtonElement);
     expect(emit).toHaveBeenCalledWith({
       type: "decide",
