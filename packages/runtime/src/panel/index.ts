@@ -1,5 +1,5 @@
 export * from "../shared/portable.js";
-export { isRpcConnectionLost } from "@vibestudio/rpc";
+export { isRpcConnectionLost, isPanelRuntimeLeaseConflict } from "@vibestudio/rpc";
 export type {
   WorkspaceProvider,
   RuntimeConnectionInfo,

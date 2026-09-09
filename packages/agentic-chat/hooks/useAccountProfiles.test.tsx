@@ -43,3 +43,29 @@ it("retains profile attribution through an outage and refreshes after recovery",
   await vi.advanceTimersByTimeAsync(30_000);
   expect(call).toHaveBeenCalledTimes(4);
 });
+
+it("stays quiet while the panel runtime lease moves between connections", async () => {
+  vi.useFakeTimers();
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const profile = { userId: "alice", handle: "alice", displayName: "Alice" };
+  // A reconnect re-leases the panel; calls that race the handoff are refused
+  // until the new lease settles, then resolve on their own.
+  const call = vi
+    .fn()
+    .mockRejectedValueOnce(
+      new RpcBoundaryError(
+        "Panel runtime is leased by Desktop",
+        "transport",
+        "panel_runtime_leased",
+      ),
+    )
+    .mockResolvedValue({ alice: profile });
+  const { result } = renderHook(() =>
+    useAccountProfiles({ call }, ["user:alice"]),
+  );
+  await act(async () => {});
+  expect(warn).not.toHaveBeenCalled();
+  await act(() => vi.advanceTimersByTimeAsync(30_000));
+  expect(result.current.get("user:alice")).toEqual(profile);
+  expect(warn).not.toHaveBeenCalled();
+});

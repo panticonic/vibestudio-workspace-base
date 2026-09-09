@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { isRpcConnectionLost } from "@vibestudio/rpc";
+import { isRpcConnectionLost, isPanelRuntimeLeaseConflict } from "@vibestudio/rpc";
 
 /** Prefix of channel-stamped human participant ids (WP6 §4). */
 export const USER_PARTICIPANT_PREFIX = "user:";
@@ -117,7 +117,9 @@ export function useAccountProfiles(
         setProfiles(next);
       } catch (err) {
         // Rendering falls back to channel-carried metadata; never throw in UI.
-        if (!isRpcConnectionLost(err)) {
+        // A lost connection and a panel lease moving are both transitions the
+        // next refresh resolves — warning about them reads as a broken panel.
+        if (!isRpcConnectionLost(err) && !isPanelRuntimeLeaseConflict(err)) {
           console.warn("[useAccountProfiles] Failed to resolve profiles:", err);
         }
       }
