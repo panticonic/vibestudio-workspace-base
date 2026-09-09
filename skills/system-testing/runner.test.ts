@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => ({
     })),
   },
   gad: {},
+  extensions: {},
+  workers: { resolveService: vi.fn() },
   openPanel: vi.fn(),
   panelTree: {},
   blobstore: { putText: vi.fn() },
@@ -47,13 +49,18 @@ vi.mock("@workspace/agentic-session", () => ({
   HeadlessSession: { createWithAgent: mocks.createWithAgent },
 }));
 
+// Every binding `runner.ts` imports must be present: `extensions` is read while
+// the class body initializes, so omitting one fails construction in every case
+// rather than only in the tests that exercise it.
 vi.mock("@workspace/runtime", () => ({
   gad: mocks.gad,
   blobstore: mocks.blobstore,
+  extensions: mocks.extensions,
   openPanel: mocks.openPanel,
   panelTree: mocks.panelTree,
   rpc: mocks.rpc,
   vcs: mocks.vcs,
+  workers: mocks.workers,
 }));
 
 import {
