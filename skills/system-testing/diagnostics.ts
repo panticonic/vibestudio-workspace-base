@@ -6,6 +6,10 @@ import type {
   ToolFailureSummary,
 } from "./types.js";
 import { isUnexpectedToolFailure } from "./tool-failure-classification.js";
+import {
+  summarizeChannelDeliveryLatency,
+  type ChannelDeliveryLatencySummary,
+} from "./delivery-latency.js";
 import { findFinalAgentCompletionMessage, isAgentAuthoredMessage } from "./agent-message.js";
 
 export interface DiagnosticInvocation {
@@ -142,6 +146,7 @@ export interface FailureDiagnostic {
     }>;
     counteractedChangeCount: number;
   } | null;
+  channelDeliveryLatency: ChannelDeliveryLatencySummary | null;
   participants: Array<{
     id: string;
     name?: string;
@@ -234,6 +239,7 @@ function summarizeFailure(
   const unexpectedToolFailures = (entryExecution["toolFailures"] ?? []).filter(
     isUnexpectedToolFailure
   );
+  const channelDeliveryLatency = summarizeChannelDeliveryLatency(entryExecution["diagnostics"]);
 
   return {
     name: entry.test.name,
@@ -262,12 +268,19 @@ function summarizeFailure(
     cleanupErrors,
     cleanupFailures: entryExecution["cleanupFailures"] ?? [],
     workspaceRepoFixture: summarizeWorkspaceRepoFixture(entryExecution["diagnostics"]),
+    channelDeliveryLatency,
     participants,
     likelyIssue: entry.result.passed
       ? unexpectedToolFailures.length > 0
         ? `tool-failure-observed:${unexpectedToolFailures.map((failure) => failure.name).join(",")}`
         : "passed"
-      : classifyFailure(entry, finalAgentMessage, invocations, cleanupErrors),
+      : classifyFailure(
+          entry,
+          finalAgentMessage,
+          invocations,
+          cleanupErrors,
+          channelDeliveryLatency?.violations ?? []
+        ),
   };
 }
 
@@ -369,7 +382,8 @@ function classifyFailure(
   entry: TestSuiteResultEntry,
   finalAgentMessage: string | null,
   invocations: FailureDiagnostic["invocations"],
-  cleanupErrors: string[]
+  cleanupErrors: string[],
+  channelDeliveryLatencyViolations: string[]
 ): string {
   const failurePhase = entry.execution.failure?.phase;
   if (failurePhase === "validation") return "validator-error";
@@ -377,6 +391,12 @@ function classifyFailure(
   if (failurePhase?.startsWith("session-cleanup")) return "cleanup-error";
   if (entry["execution"]["error"]) return "session-error";
   if (cleanupErrors.length > 0) return "cleanup-error";
+  // The latency gate only overrides an already-passing scenario validator, so
+  // whenever it fires it is the verdict. Deriving the classification from the
+  // same histogram that produced the reason keeps `likelyIssue` pointed at
+  // delivery instead of at agent behavior the ladder below would otherwise
+  // blame. Those observations stay visible in `invocations` and `toolFailures`.
+  if (channelDeliveryLatencyViolations.length > 0) return "channel-delivery-latency";
   const incomplete = invocations.filter((invocation) => invocation.status !== "complete");
   if (incomplete.length > 0)
     return `incomplete-invocation:${incomplete.map((i) => i.name).join(",")}`;

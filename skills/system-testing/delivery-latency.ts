@@ -43,3 +43,68 @@ export function channelDeliveryLatencyViolations(diagnostics: Record<string, unk
   );
   return violations;
 }
+
+export interface ChannelDeliveryLatencyBucket {
+  upperBoundMs: number;
+  samples: number;
+  maximumMs: number;
+}
+
+export interface ChannelDeliveryLatencyMetric {
+  metric: Metric;
+  budgetMs: number;
+  maximumMs: number;
+  samples: number;
+  overBudget: boolean;
+  buckets: ChannelDeliveryLatencyBucket[];
+}
+
+export interface ChannelDeliveryLatencySummary {
+  violations: string[];
+  metrics: ChannelDeliveryLatencyMetric[];
+}
+
+/** The regression gate reports its verdict as prose. Bounded failure packets
+ * need the histogram that produced it: whether a span sat in one bucket (a
+ * fixed stall) or spread across several (contention) is the whole diagnosis,
+ * and it is unrecoverable from the reason string alone. */
+export function summarizeChannelDeliveryLatency(
+  diagnostics: Record<string, unknown> | undefined
+): ChannelDeliveryLatencySummary | null {
+  if (!diagnostics || !diagnostics["channelDelivery"]) return null;
+  const rows = (
+    diagnostics["channelDelivery"] as {
+      deliveryLifecycle?: { latencyHistogram?: unknown };
+    }
+  ).deliveryLifecycle?.latencyHistogram;
+  const buckets = new Map<Metric, ChannelDeliveryLatencyBucket[]>();
+  if (Array.isArray(rows)) {
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const { metric, upper_bound_ms, samples, maximum_ms } = row as Record<string, unknown>;
+      if (typeof metric !== "string" || !(metric in CHANNEL_DELIVERY_LATENCY_BASELINE_MS)) continue;
+      if (typeof maximum_ms !== "number" || !Number.isFinite(maximum_ms)) continue;
+      const list = buckets.get(metric as Metric) ?? [];
+      list.push({
+        upperBoundMs: typeof upper_bound_ms === "number" ? upper_bound_ms : -1,
+        samples: typeof samples === "number" ? samples : 0,
+        maximumMs: maximum_ms,
+      });
+      buckets.set(metric as Metric, list);
+    }
+  }
+  const metrics = [...buckets].map(([metric, rowsForMetric]) => {
+    const ordered = [...rowsForMetric].sort((a, b) => a.upperBoundMs - b.upperBoundMs);
+    const maximumMs = ordered.reduce((max, bucket) => Math.max(max, bucket.maximumMs), 0);
+    return {
+      metric,
+      budgetMs: CHANNEL_DELIVERY_LATENCY_BASELINE_MS[metric],
+      maximumMs,
+      samples: ordered.reduce((total, bucket) => total + bucket.samples, 0),
+      overBudget: maximumMs > CHANNEL_DELIVERY_LATENCY_BASELINE_MS[metric],
+      buckets: ordered,
+    };
+  });
+  metrics.sort((a, b) => a.metric.localeCompare(b.metric));
+  return { violations: channelDeliveryLatencyViolations(diagnostics), metrics };
+}

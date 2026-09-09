@@ -293,6 +293,106 @@ describe("system-testing diagnostics", () => {
     });
   });
 
+  it("retains the histogram behind a channel delivery latency verdict and blames delivery", () => {
+    // Reproduces the bounded packet an investigator gets when the latency gate
+    // overrides an otherwise passing scenario: without the histogram the stated
+    // reason has no supporting evidence, and the classification ladder blames
+    // the agent's own transcript instead.
+    const entry = entryWithMessages([]);
+    entry.result = {
+      passed: false,
+      reason:
+        "Channel delivery latency regression: publish-to-recipient-execution: 34778ms exceeds 30000ms baseline",
+    };
+    entry.execution.diagnostics = {
+      channelDelivery: {
+        deliveryLifecycle: {
+          latencyHistogram: [
+            {
+              metric: "publish-to-recipient-execution",
+              upper_bound_ms: 2147483647,
+              samples: 1,
+              total_ms: 34778,
+              maximum_ms: 34778,
+            },
+            {
+              metric: "publish-to-recipient-execution",
+              upper_bound_ms: 1000,
+              samples: 4,
+              total_ms: 2400,
+              maximum_ms: 900,
+            },
+            {
+              metric: "call-to-provider-execution",
+              upper_bound_ms: 500,
+              samples: 2,
+              total_ms: 700,
+              maximum_ms: 420,
+            },
+          ],
+        },
+      },
+    };
+
+    const diagnostic = summarizeEntry(entry);
+    expect(diagnostic.likelyIssue).toBe("channel-delivery-latency");
+    expect(diagnostic.channelDeliveryLatency).toEqual({
+      violations: [
+        "publish-to-recipient-execution: 34778ms exceeds 30000ms baseline",
+      ],
+      metrics: [
+        {
+          metric: "call-to-provider-execution",
+          budgetMs: 30000,
+          maximumMs: 420,
+          samples: 2,
+          overBudget: false,
+          buckets: [{ upperBoundMs: 500, samples: 2, maximumMs: 420 }],
+        },
+        {
+          metric: "publish-to-recipient-execution",
+          budgetMs: 30000,
+          maximumMs: 34778,
+          samples: 5,
+          overBudget: true,
+          buckets: [
+            { upperBoundMs: 1000, samples: 4, maximumMs: 900 },
+            { upperBoundMs: 2147483647, samples: 1, maximumMs: 34778 },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("keeps a concrete scenario fault ahead of a within-budget delivery histogram", () => {
+    const entry = entryWithMessages([]);
+    entry.execution.cleanupErrors = ["unsubscribeHeadlessAgent: relay failed"];
+    entry.execution.diagnostics = {
+      channelDelivery: {
+        deliveryLifecycle: {
+          latencyHistogram: [
+            {
+              metric: "publish-to-recipient-execution",
+              upper_bound_ms: 1000,
+              samples: 3,
+              total_ms: 1200,
+              maximum_ms: 600,
+            },
+          ],
+        },
+      },
+    };
+
+    const diagnostic = summarizeEntry(entry);
+    expect(diagnostic.likelyIssue).toBe("cleanup-error");
+    expect(diagnostic.channelDeliveryLatency?.violations).toEqual([]);
+    expect(diagnostic.channelDeliveryLatency?.metrics[0]?.overBudget).toBe(false);
+  });
+
+  it("omits the latency projection when channel delivery was never collected", () => {
+    expect(summarizeEntry(entryWithMessages([])).channelDeliveryLatency).toBeNull();
+  });
+
   it("includes bounded workspace repo fixture teardown diagnostics", () => {
     const entry = entryWithMessages([]);
     entry.execution.diagnostics = {
