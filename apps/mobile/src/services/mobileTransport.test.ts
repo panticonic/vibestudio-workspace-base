@@ -207,6 +207,11 @@ describe("MobileRpcClient Iroh transport", () => {
     expect(firstRpc.expose).toHaveBeenCalledWith(
       "mobileBrowserPrivacyPresentation.open",
       handler,
+      {
+        kind: "closed",
+        reason:
+          "This handler controls an internal execution or presentation surface.",
+      },
     );
 
     await client.close();
@@ -214,6 +219,11 @@ describe("MobileRpcClient Iroh transport", () => {
     expect(secondRpc.expose).toHaveBeenCalledWith(
       "mobileBrowserPrivacyPresentation.open",
       handler,
+      {
+        kind: "closed",
+        reason:
+          "This handler controls an internal execution or presentation surface.",
+      },
     );
   });
 
