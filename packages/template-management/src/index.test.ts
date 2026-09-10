@@ -13,7 +13,6 @@ describe("template management client", () => {
               url: "https://example.com/base.git",
               ref: "refs/tags/v1",
               commit: "1".repeat(40),
-              snapshot: `v1-sha256:${"2".repeat(64)}`,
             },
             repositories: [],
             files: [],
@@ -42,7 +41,6 @@ it("resolves moving URLs once and sends every exact pin to the host owner", asyn
     url: "https://example.invalid/dirty.git",
     ref: "refs/heads/main",
     commit: "a".repeat(40),
-    snapshot: `v1-sha256:${"b".repeat(64)}` as const,
   };
   const invoke = vi.fn(async (_extension, method) => {
     if (method === "resolveSource") return pin;
