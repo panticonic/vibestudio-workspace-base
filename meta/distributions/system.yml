@@ -2,8 +2,7 @@ template:
   name: System
   description: Your private client applications and device settings.
   dependencies:
-    - url: git+https://github.com/panticonic/vibestudio-workspace-base.git
-      track: refs/tags/distributions/base/v*
+    - url: git+https://github.com/panticonic/vibestudio-base.git
   repositories:
     - about/about
     - about/adblock

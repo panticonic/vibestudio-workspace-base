@@ -2,8 +2,7 @@ template:
   name: Personal
   description: Your private projects, browsing and personal work.
   dependencies:
-    - url: git+https://github.com/panticonic/vibestudio-workspace-base.git
-      track: refs/tags/distributions/base/v*
+    - url: git+https://github.com/panticonic/vibestudio-base.git
   repositories:
     - about/bookmarks
     - about/browser-import-inspector
