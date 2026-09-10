@@ -87,7 +87,8 @@ function projectManifest(
   selected: ReadonlySet<string>,
   files: readonly string[],
   presentation: { name: string; description: string },
-  includeWorkspaceDefaults: boolean
+  includeWorkspaceDefaults: boolean,
+  dependencies: TemplateAuthoringIntent["dependencies"]
 ): string {
   const upstreams = selectedGitMap(config.git?.upstreams, selected);
   const portableUpstreams = upstreams
@@ -181,6 +182,9 @@ function projectManifest(
     ...runtime,
     template: {
       ...presentation,
+      // Declared so an installation acquires what this was built on, rather
+      // than expecting to find it copied in here.
+      ...(dependencies && dependencies.length > 0 ? { dependencies } : {}),
       repositories: [...selected].sort(compareUtf16CodeUnits),
       files: [...files].sort(compareUtf16CodeUnits),
     },
@@ -313,13 +317,25 @@ async function workspacePackageMetadata(
 export async function inspectTemplateAuthoring(
   ctx: ExtensionContextLike,
   observation: SemanticWorkspaceObservation,
-  rawRequest: TemplateAuthoringIntent
+  rawRequest: TemplateAuthoringIntent,
+  /**
+   * Repositories the request's declared dependencies already supply.
+   *
+   * Resolved by the caller, because reading a dependency's inventory is a
+   * network operation and this inspection has to stay a pure function of the
+   * workspace state its fingerprint covers.
+   */
+  inheritedParts: readonly string[] = []
 ): Promise<TemplateAuthoringInspection> {
   const name = rawRequest.name.trim();
   const description = rawRequest.description.trim();
   if (!name) throw new Error("Template name is required");
   if (!description) throw new Error("Template description is required");
-  const inherited = new Set<string>();
+  // A template built on another excludes the other's repositories instead of
+  // copying them: the published manifest declares the dependency and an
+  // installation acquires it. Without this the closure below walks straight
+  // back into everything the dependency provides.
+  const inherited = new Set(inheritedParts.map(normalizeWorkspaceRepoPath));
   const selectableParts = [
     ...new Set([
       ...observation.localRepoPaths,
@@ -334,6 +350,11 @@ export async function inspectTemplateAuthoring(
   );
   if (!requestedParts.length) throw new Error("Choose at least one workspace part");
   for (const repoPath of requestedParts) {
+    if (inherited.has(repoPath)) {
+      throw new Error(
+        `Workspace repository ${repoPath} is already provided by a declared dependency`
+      );
+    }
     if (!selectable.has(repoPath)) throw new Error(`Unknown workspace repository ${repoPath}`);
   }
 
@@ -366,7 +387,7 @@ export async function inspectTemplateAuthoring(
         if (!owner) {
           throw new Error(`${repoPath} depends on missing workspace package ${dependency}`);
         }
-        if (!included.has(owner)) {
+        if (!inherited.has(owner) && !included.has(owner)) {
           included.add(owner);
           required.add(owner);
           changed = true;
@@ -391,7 +412,8 @@ export async function inspectTemplateAuthoring(
     new Set(includedParts.filter((repoPath) => repoPath !== META_REPOSITORY)),
     await standaloneFiles(ctx, observation),
     { name, description },
-    selectableParts.every((repoPath) => included.has(repoPath) || inherited.has(repoPath))
+    selectableParts.every((repoPath) => included.has(repoPath) || inherited.has(repoPath)),
+    rawRequest.dependencies
   );
   const manifestDigest = `v1-sha256:${sha256HexSyncText(manifest)}` as const;
   const request: TemplateAuthoringIntent = {

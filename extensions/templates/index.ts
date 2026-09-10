@@ -25,6 +25,42 @@ export async function resolveInspectionPin(
   throw new Error("Unsupported template locator");
 }
 
+/**
+ * Read what a request's declared dependencies already supply.
+ *
+ * A dependency is read at its own address. Publication commits a template to
+ * `main` of its repository and tags the version, so a published template's
+ * default branch is its latest version by construction — which is what makes
+ * reading the address, rather than resolving a track, the same answer. An
+ * exact `commit` is used exactly.
+ */
+async function inheritedParts(
+  ctx: ExtensionContextLike,
+  intent: TemplateAuthoringIntent,
+): Promise<string[]> {
+  const parts: string[] = [];
+  for (const dependency of intent.dependencies ?? []) {
+    const inspection = await inspect(
+      ctx,
+      dependency.commit
+        ? {
+            pin: {
+              url: dependency.url,
+              ref: dependency.track ?? "refs/heads/main",
+              commit: dependency.commit,
+              ...(dependency.credential ? { credential: dependency.credential } : {}),
+            },
+          }
+        : {
+            url: dependency.url,
+            ...(dependency.credential ? { credential: dependency.credential } : {}),
+          },
+    );
+    parts.push(...inspection.repositories);
+  }
+  return parts;
+}
+
 async function inspect(ctx: ExtensionContextLike, locator: TemplateLocator) {
   const pin = await resolveInspectionPin(ctx, locator);
   return ctx.rpc.call<TemplateInspection>(
@@ -41,7 +77,12 @@ export async function activate(ctx: ExtensionContextLike) {
       discoverDirectTemplatePin(ctx, ctx.storage.root, source),
     inspect: (locator: TemplateLocator) => inspect(ctx, locator),
     inspectAuthoring: async (input: TemplateAuthoringIntent) =>
-      inspectTemplateAuthoring(ctx, await observeWorkspace(ctx), input),
+      inspectTemplateAuthoring(
+        ctx,
+        await observeWorkspace(ctx),
+        input,
+        await inheritedParts(ctx, input),
+      ),
     authoringParts: async () =>
       listTemplateAuthoringParts(ctx, await observeWorkspace(ctx)),
     async publishAuthoring(input: {
@@ -58,6 +99,7 @@ export async function activate(ctx: ExtensionContextLike) {
         ctx,
         observation,
         input.intent,
+        await inheritedParts(ctx, input.intent),
       );
       if (current.fingerprint !== input.expectedFingerprint)
         throw new Error(

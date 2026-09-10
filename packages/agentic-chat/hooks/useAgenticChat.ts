@@ -1445,7 +1445,12 @@ Use package imports available to inline_ui plus relative imports for local helpe
             return;
           }
           const delayMs = connectionRetryDelayMs(transientAttempt++);
-          console.warn(`[Chat] Transient connection failure; retrying in ${delayMs}ms`, err);
+          // A failure this loop is about to retry is not news. A first startup
+          // builds the workspace while the panel is already connecting, so a
+          // call can time out on a slow machine and succeed moments later;
+          // saying so at warning level reports a defect for something that
+          // healed itself, and the retry that follows is the real answer.
+          console.debug(`[Chat] Transient connection failure; retrying in ${delayMs}ms`, err);
           await new Promise<void>((resolve) => {
             retryTimer = setTimeout(resolve, delayMs);
           });

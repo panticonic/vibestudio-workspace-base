@@ -12,6 +12,7 @@
  */
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { isTransientConnectionFailure } from "../connectionRetry.js";
 import type {
   PubSubClient,
   ChannelConfig,
@@ -324,7 +325,15 @@ export function useChatCore({
           }
         },
         onError: (err) => {
-          console.error("[useChatCore] connection error:", err);
+          // The retry loop owns a transient failure's outcome, so reporting it
+          // here as an error would name the same self-healing transition twice
+          // — once as a defect. The surface still records it either way, which
+          // is what a reconnect clears.
+          if (isTransientConnectionFailure(err)) {
+            console.debug("[useChatCore] transient connection failure:", err);
+          } else {
+            console.error("[useChatCore] connection error:", err);
+          }
           setConnectionError({ message: err.message, at: Date.now(), cause: err });
         },
         onEvent: (event: IncomingEvent) => {
