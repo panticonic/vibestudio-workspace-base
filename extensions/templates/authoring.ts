@@ -19,6 +19,7 @@ import { WorkspaceConfigTopLayerSchema } from "@vibestudio/workspace-contracts/w
 import { WORKSPACE_PACKAGE_SCOPES } from "@vibestudio/workspace-contracts/sourceDirs";
 import type { WorkspaceConfig } from "@vibestudio/workspace-contracts/types";
 import { parseTemplateManifestContent } from "@vibestudio/workspace/templateManifest";
+import { resolveTemplateClosure } from "@vibestudio/workspace/templateClosure";
 import type { ExtensionContextLike } from "./context.js";
 import type { SemanticWorkspaceObservation } from "./workspace.js";
 
@@ -58,7 +59,7 @@ function sourceOf(value: unknown): string | null {
 function selectedRecords<T>(
   values: readonly T[] | undefined,
   selected: ReadonlySet<string>,
-  source: (value: T) => string | null = sourceOf
+  source: (value: T) => string | null = sourceOf,
 ): T[] | undefined {
   const result = (values ?? []).filter((value) => {
     const repoPath = source(value);
@@ -69,13 +70,15 @@ function selectedRecords<T>(
 
 function selectedGitMap<T>(
   value: Record<string, Record<string, T>> | undefined,
-  selected: ReadonlySet<string>
+  selected: ReadonlySet<string>,
 ): Record<string, Record<string, T>> | undefined {
   if (!value) return undefined;
   const result: Record<string, Record<string, T>> = {};
   for (const [section, repos] of Object.entries(value)) {
     const kept = Object.fromEntries(
-      Object.entries(repos).filter(([repo]) => selected.has(`${section}/${repo}`))
+      Object.entries(repos).filter(([repo]) =>
+        selected.has(`${section}/${repo}`),
+      ),
     );
     if (Object.keys(kept).length) result[section] = kept;
   }
@@ -88,7 +91,7 @@ function projectManifest(
   files: readonly string[],
   presentation: { name: string; description: string },
   includeWorkspaceDefaults: boolean,
-  dependencies: TemplateAuthoringIntent["dependencies"]
+  dependencies: TemplateAuthoringIntent["dependencies"],
 ): string {
   const upstreams = selectedGitMap(config.git?.upstreams, selected);
   const portableUpstreams = upstreams
@@ -97,11 +100,15 @@ function projectManifest(
           section,
           Object.fromEntries(
             Object.entries(repos).map(([repo, upstream]) => {
-              const { authorEmail: _email, authorName: _name, ...portable } = upstream;
+              const {
+                authorEmail: _email,
+                authorName: _name,
+                ...portable
+              } = upstream;
               return [repo, portable];
-            })
+            }),
           ),
-        ])
+        ]),
       )
     : undefined;
   const providers = config.providers
@@ -115,7 +122,7 @@ function projectManifest(
                 ? declaration.extension
                 : null;
           return ref !== null && selected.has(ref);
-        })
+        }),
       )
     : undefined;
   const trust = config.trust
@@ -125,59 +132,60 @@ function projectManifest(
             key,
             values?.filter((repoPath: string) => selected.has(repoPath)),
           ])
-          .filter(([, values]) => Array.isArray(values) && values.length > 0)
+          .filter(([, values]) => Array.isArray(values) && values.length > 0),
       )
     : undefined;
   const hostTargets = config.hostTargets
     ? Object.fromEntries(
         Object.entries(config.hostTargets).filter(
-          ([, target]) => target && selected.has(target.app)
-        )
+          ([, target]) => target && selected.has(target.app),
+        ),
       )
     : undefined;
   const runtime = WorkspaceConfigTopLayerSchema.parse({
-      systemEpoch: config.systemEpoch,
-      ...(config.defaultRepo && selected.has(config.defaultRepo)
-        ? { defaultRepo: config.defaultRepo }
-        : {}),
-      ...(selectedRecords(config.initPanels, selected)
-        ? { initPanels: selectedRecords(config.initPanels, selected) }
-        : {}),
-      ...(selectedRecords(config.singletonObjects, selected)
-        ? { singletonObjects: selectedRecords(config.singletonObjects, selected) }
-        : {}),
-      ...(selectedRecords(config.services, selected)
-        ? { services: selectedRecords(config.services, selected) }
-        : {}),
-      ...(selectedRecords(config.routes, selected)
-        ? { routes: selectedRecords(config.routes, selected) }
-        : {}),
-      ...(selectedRecords(config.extensions, selected)
-        ? { extensions: selectedRecords(config.extensions, selected) }
-        : {}),
-      ...(selectedRecords(config.apps, selected)
-        ? { apps: selectedRecords(config.apps, selected) }
-        : {}),
-      ...(includeWorkspaceDefaults && config.panelRestorePolicy
-        ? { panelRestorePolicy: config.panelRestorePolicy }
-        : {}),
-      ...(includeWorkspaceDefaults && config.defaultAgentConfig
-        ? { defaultAgentConfig: config.defaultAgentConfig }
-        : {}),
-      ...(config.git && (selectedGitMap(config.git.remotes, selected) || portableUpstreams)
-        ? {
-            git: {
-              ...(selectedGitMap(config.git.remotes, selected)
-                ? { remotes: selectedGitMap(config.git.remotes, selected) }
-                : {}),
-              ...(portableUpstreams ? { upstreams: portableUpstreams } : {}),
-            },
-          }
-        : {}),
-      ...(providers && Object.keys(providers).length ? { providers } : {}),
-      ...(trust && Object.keys(trust).length ? { trust } : {}),
-      ...(hostTargets && Object.keys(hostTargets).length ? { hostTargets } : {}),
-    });
+    systemEpoch: config.systemEpoch,
+    ...(config.defaultRepo && selected.has(config.defaultRepo)
+      ? { defaultRepo: config.defaultRepo }
+      : {}),
+    ...(selectedRecords(config.initPanels, selected)
+      ? { initPanels: selectedRecords(config.initPanels, selected) }
+      : {}),
+    ...(selectedRecords(config.singletonObjects, selected)
+      ? { singletonObjects: selectedRecords(config.singletonObjects, selected) }
+      : {}),
+    ...(selectedRecords(config.services, selected)
+      ? { services: selectedRecords(config.services, selected) }
+      : {}),
+    ...(selectedRecords(config.routes, selected)
+      ? { routes: selectedRecords(config.routes, selected) }
+      : {}),
+    ...(selectedRecords(config.extensions, selected)
+      ? { extensions: selectedRecords(config.extensions, selected) }
+      : {}),
+    ...(selectedRecords(config.apps, selected)
+      ? { apps: selectedRecords(config.apps, selected) }
+      : {}),
+    ...(includeWorkspaceDefaults && config.panelRestorePolicy
+      ? { panelRestorePolicy: config.panelRestorePolicy }
+      : {}),
+    ...(includeWorkspaceDefaults && config.defaultAgentConfig
+      ? { defaultAgentConfig: config.defaultAgentConfig }
+      : {}),
+    ...(config.git &&
+    (selectedGitMap(config.git.remotes, selected) || portableUpstreams)
+      ? {
+          git: {
+            ...(selectedGitMap(config.git.remotes, selected)
+              ? { remotes: selectedGitMap(config.git.remotes, selected) }
+              : {}),
+            ...(portableUpstreams ? { upstreams: portableUpstreams } : {}),
+          },
+        }
+      : {}),
+    ...(providers && Object.keys(providers).length ? { providers } : {}),
+    ...(trust && Object.keys(trust).length ? { trust } : {}),
+    ...(hostTargets && Object.keys(hostTargets).length ? { hostTargets } : {}),
+  });
   return canonicalYaml({
     ...runtime,
     template: {
@@ -193,7 +201,7 @@ function projectManifest(
 
 async function standaloneFiles(
   ctx: ExtensionContextLike,
-  observation: SemanticWorkspaceObservation
+  observation: SemanticWorkspaceObservation,
 ): Promise<string[]> {
   const resolved = await repository(ctx, observation, META_REPOSITORY);
   const file = await ctx.rpc.call<VcsReadFileResult>("main", "vcs.readFile", {
@@ -204,27 +212,32 @@ async function standaloneFiles(
   if (!file) throw new Error("Workspace meta/vibestudio.yml disappeared");
   return parseTemplateManifestContent(
     text(file),
-    observation.runtimeTop.systemEpoch
+    observation.runtimeTop.systemEpoch,
   ).inventory.files;
 }
 
 async function repository(
   ctx: ExtensionContextLike,
   observation: SemanticWorkspaceObservation,
-  repoPath: string
+  repoPath: string,
 ): Promise<NonNullable<VcsResolveRepositoryResult>> {
-  const resolved = await ctx.rpc.call<VcsResolveRepositoryResult>("main", "vcs.resolveRepository", {
-    state: observation.mainState,
-    repoPath,
-  });
-  if (!resolved) throw new Error(`Workspace repository ${repoPath} disappeared`);
+  const resolved = await ctx.rpc.call<VcsResolveRepositoryResult>(
+    "main",
+    "vcs.resolveRepository",
+    {
+      state: observation.mainState,
+      repoPath,
+    },
+  );
+  if (!resolved)
+    throw new Error(`Workspace repository ${repoPath} disappeared`);
   return resolved;
 }
 
 async function packageMetadata(
   ctx: ExtensionContextLike,
   observation: SemanticWorkspaceObservation,
-  repoPath: string
+  repoPath: string,
 ): Promise<{ name?: string; dependencies: string[] }> {
   const resolved = await repository(ctx, observation, repoPath);
   const file = await ctx.rpc.call<VcsReadFileResult>("main", "vcs.readFile", {
@@ -238,7 +251,7 @@ async function packageMetadata(
 
 function parsePackageMetadata(
   repoPath: string,
-  source: string
+  source: string,
 ): { name?: string; dependencies: string[] } {
   let parsed: {
     name?: unknown;
@@ -262,7 +275,7 @@ function parsePackageMetadata(
       ([name, version]) =>
         isAuthoredWorkspacePackage(name) &&
         typeof version === "string" &&
-        version.startsWith(WORKSPACE_DEPENDENCY)
+        version.startsWith(WORKSPACE_DEPENDENCY),
     )
     .map(([name]) => name);
   return {
@@ -271,18 +284,22 @@ function parsePackageMetadata(
   };
 }
 
-function runtimeReferences(config: WorkspaceConfig): Array<[owner: string, target: string]> {
+function runtimeReferences(
+  config: WorkspaceConfig,
+): Array<[owner: string, target: string]> {
   const refs: Array<[string, string]> = [];
   const add = (owner: string | null, target: string | null) => {
     if (owner && target) refs.push([owner, target]);
   };
   for (const item of config.initPanels ?? []) add(item.source, item.source);
-  for (const item of config.singletonObjects ?? []) add(item.source, item.source);
+  for (const item of config.singletonObjects ?? [])
+    add(item.source, item.source);
   for (const item of config.services ?? []) add(item.source, item.source);
   for (const item of config.routes ?? []) add(item.source, item.source);
   for (const target of Object.values(config.hostTargets ?? {})) {
     if (!target) continue;
-    for (const extension of target.requiresExtensions ?? []) add(target.app, extension);
+    for (const extension of target.requiresExtensions ?? [])
+      add(target.app, extension);
   }
   return refs;
 }
@@ -292,7 +309,7 @@ type AuthoringPackageMetadata = { name?: string; dependencies: string[] };
 async function workspacePackageMetadata(
   ctx: ExtensionContextLike,
   observation: SemanticWorkspaceObservation,
-  repoPaths: readonly string[]
+  repoPaths: readonly string[],
 ): Promise<ReadonlyMap<string, AuthoringPackageMetadata>> {
   const entries: Array<readonly [string, AuthoringPackageMetadata]> = [];
   // A full workspace can contain hundreds of repositories. Keep semantic VCS
@@ -306,9 +323,12 @@ async function workspacePackageMetadata(
           .slice(offset, offset + concurrency)
           .map(
             async (repoPath) =>
-              [repoPath, await packageMetadata(ctx, observation, repoPath)] as const
-          )
-      ))
+              [
+                repoPath,
+                await packageMetadata(ctx, observation, repoPath),
+              ] as const,
+          ),
+      )),
     );
   }
   return new Map(entries);
@@ -325,7 +345,7 @@ export async function inspectTemplateAuthoring(
    * network operation and this inspection has to stay a pure function of the
    * workspace state its fingerprint covers.
    */
-  inheritedParts: readonly string[] = []
+  inheritedParts: readonly string[] = [],
 ): Promise<TemplateAuthoringInspection> {
   const name = rawRequest.name.trim();
   const description = rawRequest.description.trim();
@@ -336,36 +356,38 @@ export async function inspectTemplateAuthoring(
   // installation acquires it. Without this the closure below walks straight
   // back into everything the dependency provides.
   const inherited = new Set(inheritedParts.map(normalizeWorkspaceRepoPath));
-  const selectableParts = [
-    ...new Set([
-      ...observation.localRepoPaths,
-    ]),
-  ]
+  const selectableParts = [...new Set([...observation.localRepoPaths])]
     .filter((repoPath) => repoPath !== META_REPOSITORY)
     .map(normalizeWorkspaceRepoPath)
     .sort(compareUtf16CodeUnits);
   const selectable = new Set(selectableParts);
-  const requestedParts = [...new Set(rawRequest.parts.map(normalizeWorkspaceRepoPath))].sort(
-    compareUtf16CodeUnits
-  );
-  if (!requestedParts.length) throw new Error("Choose at least one workspace part");
+  const requestedParts = [
+    ...new Set(rawRequest.parts.map(normalizeWorkspaceRepoPath)),
+  ].sort(compareUtf16CodeUnits);
+  if (!requestedParts.length)
+    throw new Error("Choose at least one workspace part");
   for (const repoPath of requestedParts) {
     if (inherited.has(repoPath)) {
       throw new Error(
-        `Workspace repository ${repoPath} is already provided by a declared dependency`
+        `Workspace repository ${repoPath} is already provided by a declared dependency`,
       );
     }
-    if (!selectable.has(repoPath)) throw new Error(`Unknown workspace repository ${repoPath}`);
+    if (!selectable.has(repoPath))
+      throw new Error(`Unknown workspace repository ${repoPath}`);
   }
 
-  const metadata = await workspacePackageMetadata(ctx, observation, selectableParts);
+  const metadata = await workspacePackageMetadata(
+    ctx,
+    observation,
+    selectableParts,
+  );
   const packageOwners = new Map<string, string>();
   for (const [repoPath, value] of metadata) {
     if (!value.name) continue;
     const existing = packageOwners.get(value.name);
     if (existing && existing !== repoPath) {
       throw new Error(
-        `Workspace package name ${value.name} is claimed by ${existing} and ${repoPath}`
+        `Workspace package name ${value.name} is claimed by ${existing} and ${repoPath}`,
       );
     }
     packageOwners.set(value.name, repoPath);
@@ -375,45 +397,54 @@ export async function inspectTemplateAuthoring(
   // repository supplies its declared companions (including distributions).
   // Binding meta into the same protected-main receipt prevents a source
   // publication from mixing those files across workspace revisions.
-  const included = new Set([META_REPOSITORY, ...requestedParts]);
-  const required = new Set<string>();
   const runtime = runtimeReferences(observation.runtimeTop as WorkspaceConfig);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const repoPath of [...included]) {
-      for (const dependency of metadata.get(repoPath)?.dependencies ?? []) {
-        const owner = packageOwners.get(dependency);
-        if (!owner) {
-          throw new Error(`${repoPath} depends on missing workspace package ${dependency}`);
-        }
-        if (!inherited.has(owner) && !included.has(owner)) {
-          included.add(owner);
-          required.add(owner);
-          changed = true;
-        }
+  // The walk is shared with the distribution builder, which computes the same
+  // closure over a checkout instead of this workspace's reviewed VCS state.
+  // Only these readers know how to resolve an edge from an observation.
+  const closure = resolveTemplateClosure({
+    // The authored manifest replaces meta/vibestudio.yml, while the exact meta
+    // repository supplies its declared companions (including distributions).
+    // Binding meta into the same protected-main receipt prevents a source
+    // publication from mixing those files across workspace revisions.
+    roots: [META_REPOSITORY, ...requestedParts],
+    provided: inherited,
+    packageDependenciesOf: (repoPath) =>
+      metadata.get(repoPath)?.dependencies ?? [],
+    ownerOfPackage: (dependency, dependent) => {
+      const owner = packageOwners.get(dependency);
+      if (!owner) {
+        throw new Error(
+          `${dependent} depends on missing workspace package ${dependency}`,
+        );
       }
+      return owner;
+    },
+    requiredRepositoriesOf: (repoPath) => {
+      const targets: string[] = [];
       for (const [owner, target] of runtime) {
-        if (owner !== repoPath || included.has(target)) continue;
+        if (owner !== repoPath) continue;
         if (!selectable.has(target) && !inherited.has(target))
-          throw new Error(`${repoPath} references missing workspace part ${target}`);
-        if (!inherited.has(target)) {
-          included.add(target);
-          required.add(target);
-          changed = true;
-        }
+          throw new Error(
+            `${repoPath} references missing workspace part ${target}`,
+          );
+        targets.push(target);
       }
-    }
-  }
+      return targets;
+    },
+  });
+  const included = new Set(closure.included);
+  const required = new Set(closure.required);
 
-  const includedParts = [...included].sort(compareUtf16CodeUnits);
+  const includedParts = closure.included;
   const manifest = projectManifest(
     observation.runtimeTop as WorkspaceConfig,
     new Set(includedParts.filter((repoPath) => repoPath !== META_REPOSITORY)),
     await standaloneFiles(ctx, observation),
     { name, description },
-    selectableParts.every((repoPath) => included.has(repoPath) || inherited.has(repoPath)),
-    rawRequest.dependencies
+    selectableParts.every(
+      (repoPath) => included.has(repoPath) || inherited.has(repoPath),
+    ),
+    rawRequest.dependencies,
   );
   const manifestDigest = `v1-sha256:${sha256HexSyncText(manifest)}` as const;
   const request: TemplateAuthoringIntent = {
@@ -443,13 +474,9 @@ export async function inspectTemplateAuthoring(
 
 export async function listTemplateAuthoringParts(
   ctx: ExtensionContextLike,
-  observation: SemanticWorkspaceObservation
+  observation: SemanticWorkspaceObservation,
 ): Promise<TemplateAuthoringPart[]> {
-  const repoPaths = [
-    ...new Set([
-      ...observation.localRepoPaths,
-    ]),
-  ]
+  const repoPaths = [...new Set([...observation.localRepoPaths])]
     .filter((repoPath) => repoPath !== META_REPOSITORY)
     .map(normalizeWorkspaceRepoPath)
     .sort(compareUtf16CodeUnits);
@@ -460,6 +487,6 @@ export async function listTemplateAuthoringParts(
         repoPath,
         ...(metadata.name ? { packageName: metadata.name } : {}),
       };
-    })
+    }),
   );
 }
