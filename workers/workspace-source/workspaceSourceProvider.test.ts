@@ -81,7 +81,6 @@ describe("WorkspaceSourceProviderV1", () => {
         url: "git+https://example.test/base.git",
         ref: "refs/tags/v1",
         commit: "1".repeat(40),
-        snapshot: `v1-sha256:${"2".repeat(64)}`,
       },
       repositories: [
         {
@@ -210,7 +209,6 @@ describe("WorkspaceSourceProviderV1", () => {
         url: "git+https://example.test/base.git",
         ref: "refs/tags/v1",
         commit: "4".repeat(40),
-        snapshot: `v1-sha256:${"5".repeat(64)}`,
       },
       repositories: [
         {

@@ -117,9 +117,6 @@ export function TemplateWorkspaceReview({
             >
               {inspection.pin.ref} · {inspection.pin.commit}
             </Text>
-            <Text as="div" size="1" style={{ overflowWrap: "anywhere" }}>
-              {inspection.pin.snapshot}
-            </Text>
             <Text as="div" size="1" mt="2">
               {inspection.repositories.length} source components
             </Text>

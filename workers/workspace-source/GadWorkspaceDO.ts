@@ -1628,7 +1628,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
             source: {
               kind: "generated",
               uri: "vibestudio://workspace/root-template",
-              snapshotRevision: `${input.pin.commit}:${input.pin.snapshot}`,
+              snapshotRevision: input.pin.commit,
             },
             repositories: input.repositories.map((repository) => ({
               repoPath: repository.repoPath,

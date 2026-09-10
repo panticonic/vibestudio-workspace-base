@@ -301,7 +301,6 @@ export class TemplatePublishEngine {
             templateUrl: normalizeTemplateGitUrl(repository.cloneUrl),
             ref: `refs/tags/${tag}`,
             commit: exact.commit,
-            snapshot: exact.snapshot,
             parts: parts.map(({ repoPath }) => repoPath),
           };
         };

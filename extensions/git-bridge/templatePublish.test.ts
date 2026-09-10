@@ -452,7 +452,6 @@ describe("TemplatePublishEngine", () => {
     const second = await publisher.publish(publicationInput());
 
     expect(second.commit).toBe(first.commit);
-    expect(second.snapshot).toBe(first.snapshot);
     expect(GitClient.prototype.commit).toHaveBeenCalledOnce();
     expect(GitClient.prototype.push).toHaveBeenCalledTimes(pushCount);
   });
@@ -518,7 +517,7 @@ describe("TemplatePublishEngine", () => {
       reservedPaths: "exclude",
     });
 
-    expect(result.snapshot).toBe(consumer.snapshot);
+    expect(result.commit).toBe(consumer.commit);
     expect(consumer.files.map((file) => file.path)).toEqual([
       "meta/vibestudio.yml",
       "panels/news/.npmrc",

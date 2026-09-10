@@ -372,12 +372,6 @@ export function WorkspaceCreateSheet({
               >
                 Commit {selectedTemplate.commit}
               </Text>
-              <Text
-                selectable
-                style={[type.micro, { color: colors.textTertiary }]}
-              >
-                Snapshot {selectedTemplate.snapshot}
-              </Text>
               {currentInspection && (
                 <>
                   <Pressable

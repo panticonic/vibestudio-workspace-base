@@ -152,6 +152,5 @@ export async function discoverDirectTemplatePin(
     ...(declaration.credential ? { credential: declaration.credential } : {}),
     ref: snapshot.ref,
     commit: snapshot.commit,
-    snapshot: snapshot.snapshot,
   });
 }

@@ -8,7 +8,6 @@ describe("exact template reinspection", () => {
       url: "https://example.test/app.git",
       ref: "refs/heads/main",
       commit: "a".repeat(40),
-      snapshot: `v1-sha256:${"b".repeat(64)}`,
     };
     expect(retainedInspectionPin({ pin })).toEqual(pin);
   });
@@ -19,7 +18,6 @@ it("delegates every exact pin to the host-owned source acquisition contract", as
     url: "https://example.invalid/dirty.git",
     ref: "refs/heads/main",
     commit: "a".repeat(40),
-    snapshot: `v1-sha256:${"b".repeat(64)}` as const,
   };
   const inspected = {
     pin,
