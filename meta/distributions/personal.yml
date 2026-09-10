@@ -61,18 +61,8 @@ initPanels:
 extensions:
   - source: extensions/browser-data
 providers:
-  evalEngine:
-    source: "@workspace/eval"
-  evalRuntime:
-    source: "@workspace/runtime"
-  cdpClient:
-    source: "@workspace/cdp-client"
   browserData:
     extension: extensions/browser-data
-  gitInterop:
-    extension: extensions/git-bridge
-  claudeCode:
-    extension: extensions/claude-code
 services:
   - source: workers/browser-data
     name: browser.data
