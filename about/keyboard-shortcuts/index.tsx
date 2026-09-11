@@ -60,6 +60,8 @@ const shortcutGroups: ShortcutGroup[] = [
       { description: "Command (palette and Quickfire agent)", binding: "commandPalette" },
       { description: "Focus pending approval", binding: "focusApproval" },
       { description: "Switch workspace", binding: "switchWorkspace" },
+      { description: "Next panel", binding: "nextPanel" },
+      { description: "Previous panel", binding: "previousPanel" },
       { description: "Close current panel", binding: "closePanel" },
       { description: "Keyboard shortcuts", binding: "keyboardShortcuts" },
       { description: "Quit application", keys: { mac: ["⌘", "Q"] } },
