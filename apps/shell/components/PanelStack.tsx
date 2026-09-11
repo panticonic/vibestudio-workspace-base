@@ -305,6 +305,23 @@ export const PanelStack = memo(function PanelStack({
     [findText, focusedPanelId],
   );
 
+  // Stepping through matches while the page has focus, which is the normal
+  // case: the point of finding something is to then look at it. The find field
+  // handles Enter for the other case, when focus is still in the field.
+  useShellEvent(
+    "find-in-page-step",
+    useCallback(
+      ({ forward }) => {
+        if (!findOpen) {
+          setFindOpen(true);
+          return;
+        }
+        nextFind(forward);
+      },
+      [findOpen, nextFind],
+    ),
+  );
+
   useShellEvent(
     "panel-responsiveness-changed",
     useCallback(({ panelId, responsive }) => {
