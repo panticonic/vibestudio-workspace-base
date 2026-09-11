@@ -4,7 +4,7 @@
  * Adds: stateArgs bridge, unified panel handles, panel lifecycle methods.
  */
 
-import type { EnvelopeRpcTransport } from "@vibestudio/rpc";
+import { isRpcConnectionLost, type EnvelopeRpcTransport } from "@vibestudio/rpc";
 import { createBaseRuntime } from "./createBaseRuntime.js";
 import type { GatewayConfig } from "../shared/globals.js";
 import { createParentHandleApi } from "../shared/handles.js";
@@ -50,6 +50,13 @@ export function createRuntime(deps: RuntimeDeps) {
       boot,
     }),
     onError: (error, observation) => {
+      // Boot evidence is published over the workspace connection, so a panel
+      // booting while that connection is being re-established cannot publish
+      // yet. That is the reconnect, not a panel failing to boot: the reporter
+      // publishes again on the next observation, and reporting it as a warning
+      // described a fault in a panel that was doing nothing wrong — and failed
+      // the desktop smoke, which reads renderer warnings as faults.
+      if (isRpcConnectionLost(error)) return;
       console.warn("[panelRuntime] Failed to publish renderer boot evidence", {
         phase: observation.boot.observation.phase,
         error: error instanceof Error ? error.message : String(error),
