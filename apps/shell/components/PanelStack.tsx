@@ -1262,37 +1262,6 @@ export const PanelStack = memo(function PanelStack({
     (paneId: string) => dispatch({ type: "focus-pane", paneId }),
     [dispatch],
   );
-  /**
-   * The panes as a tab strip: column by column, top to bottom within each.
-   *
-   * That is the order the viewport reads in, so it is the order `Ctrl+Tab`
-   * should walk. It wraps, because a cycle that stops at the end leaves the
-   * user to work out which end they are at.
-   */
-  const cyclePane = useCallback(
-    (forward: boolean) => {
-      const panes = layout.columns.flatMap((column) => column.panes);
-      if (panes.length === 0) return;
-      const current = panes.findIndex((pane) => pane.id === layout.focusedPaneId);
-      // With nothing focused, forward starts at the first pane and backward at
-      // the last, which is what each direction means from outside the strip.
-      const next =
-        current === -1
-          ? forward
-            ? 0
-            : panes.length - 1
-          : (current + (forward ? 1 : -1) + panes.length) % panes.length;
-      const target = panes[next];
-      if (target) dispatch({ type: "focus-pane", paneId: target.id });
-    },
-    [dispatch, layout],
-  );
-
-  useShellEvent(
-    "cycle-panel",
-    useCallback(({ forward }) => cyclePane(forward), [cyclePane]),
-  );
-
   const focusColumn = useCallback(
     (columnId: string) => {
       const column = layout.columns.find(
