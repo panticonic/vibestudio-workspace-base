@@ -343,24 +343,30 @@ describe("system-testing diagnostics", () => {
       metrics: [
         {
           metric: "call-to-provider-execution",
+          baselineMs: 30000,
           budgetMs: 30000,
           maximumMs: 420,
           samples: 2,
           overBudget: false,
+          overBaseline: false,
           buckets: [{ upperBoundMs: 500, samples: 2, maximumMs: 420 }],
         },
         {
           metric: "publish-to-recipient-execution",
+          baselineMs: 30000,
           budgetMs: 30000,
           maximumMs: 34778,
           samples: 5,
           overBudget: true,
+          overBaseline: true,
           buckets: [
             { upperBoundMs: 1000, samples: 4, maximumMs: 900 },
             { upperBoundMs: 2147483647, samples: 1, maximumMs: 34778 },
           ],
         },
       ],
+      // This test measured one agent's spans, so the isolated ceiling applies.
+      concurrentTestAgents: 1,
     });
   });
 

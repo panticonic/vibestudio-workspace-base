@@ -1763,4 +1763,69 @@ describe("system-test implementation boundary", () => {
       },
     ]);
   });
+
+  it("records the company a test kept, including an overlap entirely inside its span", async () => {
+    // The slow test is already running when the quick one starts and finishes,
+    // so sampling only its own start and end would report it as running alone.
+    let releaseSlow!: () => void;
+    let announceSlowStarted!: () => void;
+    const slowStarted = new Promise<void>((resolve) => {
+      announceSlowStarted = resolve;
+    });
+    const makeSession = (name: string) => ({
+      channelId: `chat-${name}`,
+      messages: [] as ChatMessage[],
+      captureModelExecutionEvidence: vi.fn(async () => modelEvidence()),
+      sendAndWait: vi.fn(async () => {
+        if (name === "slow") {
+          announceSlowStarted();
+          await new Promise<void>((resolve) => {
+            releaseSlow = resolve;
+          });
+        }
+        return undefined;
+      }),
+      snapshot: vi.fn(() => ({
+        messages: [],
+        invocations: [],
+        debugEvents: [],
+        cleanupErrors: [],
+        participants: {},
+        connected: true,
+        duration: 1,
+      })),
+      interrupt: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+    });
+    // spawn() takes no arguments, so the first session is the slow one by order.
+    let spawned = 0;
+    const runner = {
+      modelRef: TEST_MODEL,
+      spawn: vi.fn(async () => makeSession((spawned += 1) === 1 ? "slow" : "quick")),
+      collectDiagnostics: vi.fn(async () => ({})),
+    } as unknown as HeadlessRunner;
+    // onTestEnd is a suite-level callback, so read the executions directly.
+    const tester = new TestRunner(runner);
+    const testCase = (name: string) => ({
+      name,
+      category: "test",
+      description: name,
+      prompt: name,
+      validate: () => ({ passed: true }),
+    });
+
+    const slow = tester.runOne(testCase("slow"));
+    await slowStarted;
+    const quick = await tester.runOne(testCase("quick"));
+    releaseSlow();
+    const slowDone = await slow;
+
+    // Both executions shared the instance, so neither is gated on the
+    // isolated-run latency baseline.
+    expect([
+      slowDone.execution.diagnostics?.["concurrentTestAgents"],
+      quick.execution.diagnostics?.["concurrentTestAgents"],
+    ]).toEqual([2, 2]);
+  });
+
 });

@@ -49,6 +49,15 @@ export class TestRunner {
   private cancellationError: Error | null = null;
   private readonly activeWaits = new Set<AbortController>();
   private wakeSuiteSchedulers: (() => void) | null = null;
+  /** Test agents executing on this instance right now. Wall-clock delivery
+   * budgets are only meaningful when a test had the instance to itself, so
+   * each test records the most company it actually had. */
+  private activeTestExecutions = 0;
+  /** In-flight executions watching that count. A test that is merely overlapped
+   * in the middle — started alone, finished alone — shared the instance just as
+   * much as one that started alongside another, so every execution has to see
+   * each arrival rather than only sampling its own endpoints. */
+  private readonly concurrencyObservers = new Set<(active: number) => void>();
 
   constructor(
     private runner: HeadlessRunner,
@@ -249,6 +258,25 @@ export class TestRunner {
 
   async runOne(
     test: TestCase,
+  ): Promise<{ result: TestResult; execution: TestExecutionResult }> {
+    this.activeTestExecutions += 1;
+    let peak = this.activeTestExecutions;
+    const observe = (active: number): void => {
+      peak = Math.max(peak, active);
+    };
+    this.concurrencyObservers.add(observe);
+    for (const watcher of this.concurrencyObservers) watcher(this.activeTestExecutions);
+    try {
+      return await this.runOneExecution(test, () => peak);
+    } finally {
+      this.concurrencyObservers.delete(observe);
+      this.activeTestExecutions -= 1;
+    }
+  }
+
+  private async runOneExecution(
+    test: TestCase,
+    observeConcurrency: () => number,
   ): Promise<{ result: TestResult; execution: TestExecutionResult }> {
     const startTime = Date.now();
     const testTimeoutMs =
@@ -531,6 +559,10 @@ export class TestRunner {
           outcome.execution.diagnostics = {
             ...(outcome.execution.diagnostics ?? {}),
             ...sharedDiagnostics,
+            // Recorded with the measurement so every later reader — the
+            // bounded failure packet and the trajectory alike — reaches the
+            // same verdict without re-deriving how loaded the instance was.
+            concurrentTestAgents: observeConcurrency(),
           };
           const latencyViolations = channelDeliveryLatencyViolations(
             outcome.execution.diagnostics,
