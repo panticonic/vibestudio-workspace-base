@@ -396,6 +396,37 @@ export function getSystemTestRun(runs: unknown, runId: string): SystemTestRunRec
     : null;
 }
 
+/**
+ * Say what to do about an unusable agent model, not only that it is unusable.
+ *
+ * A missing provider credential is the one doctor failure an operator is
+ * expected to resolve themselves, and it is reached before any test can run —
+ * so the check has to name the exact command rather than leave the remedy to
+ * be rediscovered in the host's source.
+ */
+export function unusableModelDetail(unusable: {
+  model: string;
+  availability: string;
+  detail?: string;
+}): string {
+  const provider = unusable.model.split(":")[0] ?? unusable.model;
+  const connect =
+    `connect it from the host CLI with \`vibestudio model connect ${provider}\`` +
+    " (add `--manual` to print the authorization URL when this host has no browser)";
+  if (unusable.detail === "no-credential") {
+    return `model ${unusable.model} has no connected credential for provider "${provider}": ${connect}`;
+  }
+  if (unusable.detail === "credential-expired") {
+    return `model ${unusable.model} has an expired credential for provider "${provider}" that cannot refresh: ${connect}`;
+  }
+  if (unusable.detail === "not-installed") {
+    return `model ${unusable.model} is not installed on this host`;
+  }
+  return `model ${unusable.model} is not usable (${unusable.availability}${
+    unusable.detail ? `: ${unusable.detail}` : ""
+  })`;
+}
+
 export async function systemTestDoctor(
   expectedModel?: string | null
 ): Promise<SystemTestDoctorResult> {
@@ -526,19 +557,21 @@ export async function systemTestDoctor(
         ...(modelRoute.fallbackModel ? [modelRoute.fallbackModel] : []),
       ];
       const inspected = (await rpc.call(service.targetId, "inspectModels", [required])) as {
-        models?: Array<{ ref?: string; availability?: { state?: string } }>;
+        models?: Array<{ ref?: string; availability?: { state?: string; detail?: string } }>;
       };
-      const availability = required.map((modelRef) => ({
-        model: modelRef,
-        availability:
-          inspected.models?.find((model) => model.ref === modelRef)?.availability?.state ??
-          "unknown",
-      }));
+      const availability = required.map((modelRef) => {
+        const found = inspected.models?.find((model) => model.ref === modelRef)?.availability;
+        return {
+          model: modelRef,
+          availability: found?.state ?? "unknown",
+          ...(found?.detail ? { detail: found.detail } : {}),
+        };
+      });
       const unusable = availability.find(
         (entry) => entry.availability !== "ready" && entry.availability !== "startable"
       );
       if (unusable) {
-        throw new Error(`model ${unusable.model} is not usable (${unusable.availability})`);
+        throw new Error(unusableModelDetail(unusable));
       }
       return {
         primary: availability[0],

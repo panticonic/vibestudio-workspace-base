@@ -101,6 +101,7 @@ import {
   runSystemTests,
   systemTestDoctor,
   systemTestTrajectory,
+  unusableModelDetail,
   type SystemTestRunRecord,
 } from "./cli.js";
 import { SYSTEM_TEST_AGENT_MODEL, SYSTEM_TEST_USAGE_LIMIT_FALLBACK_MODEL } from "./config.js";
@@ -993,5 +994,44 @@ describe("system-testing CLI-neutral API", () => {
         },
       })
     ).toEqual(["alpha"]);
+  });
+});
+
+describe("unusable agent model guidance", () => {
+  it("names the exact connect command for a missing or expired credential", () => {
+    expect(
+      unusableModelDetail({
+        model: "openai-codex:gpt-5.3-codex-spark",
+        availability: "needs-setup",
+        detail: "no-credential",
+      })
+    ).toBe(
+      'model openai-codex:gpt-5.3-codex-spark has no connected credential for provider ' +
+        '"openai-codex": connect it from the host CLI with `vibestudio model connect openai-codex` ' +
+        "(add `--manual` to print the authorization URL when this host has no browser)"
+    );
+    expect(
+      unusableModelDetail({
+        model: "openai-codex:gpt-5.3-codex-spark",
+        availability: "needs-setup",
+        detail: "credential-expired",
+      })
+    ).toContain("vibestudio model connect openai-codex");
+  });
+
+  it("does not offer a credential remedy for a model that is simply not installed", () => {
+    const detail = unusableModelDetail({
+      model: "local:qwen3.8-27b",
+      availability: "needs-setup",
+      detail: "not-installed",
+    });
+    expect(detail).toBe("model local:qwen3.8-27b is not installed on this host");
+    expect(detail).not.toContain("model connect");
+  });
+
+  it("still reports an unrecognized availability state exactly", () => {
+    expect(unusableModelDetail({ model: "openai:gpt-5", availability: "error" })).toBe(
+      "model openai:gpt-5 is not usable (error)"
+    );
   });
 });
