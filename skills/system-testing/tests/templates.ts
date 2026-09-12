@@ -151,10 +151,14 @@ export const templateTests: TestCase[] = [
     description: `Prepare a self-contained upstream snapshot from the local ${AUTHORED_PART_PROSE}`,
     category: "templates",
     validation: "agent-evidence",
+    // Stated as the user's goal, deliberately without the repository path: a
+    // path in the prompt reframes this as a file hunt, and the scenario is
+    // whether the workspace's own authoring capability gets discovered and
+    // used. AUTHORED_PART stays the validator's expectation.
     prompt:
-      `Prepare a reusable workspace snapshot containing the ${AUTHORED_PART_PROSE} ` +
-      `(${AUTHORED_PART}). Show me what source and required dependencies it would include, ` +
-      "with an exact plan I can review. Do not publish anything.",
+      `Prepare a reusable workspace snapshot containing this workspace's ${AUTHORED_PART_PROSE}. ` +
+      "Show me what source and required dependencies it would include, with an exact plan " +
+      "I can review. Do not publish anything.",
     validate: templateAuthoringPrepared,
   },
 ];
