@@ -7,6 +7,18 @@ import {
 } from "./_scenario-evidence.js";
 import { findLastAgentMessage } from "./_helpers.js";
 
+/**
+ * The workspace part this scenario asks to be snapshotted.
+ *
+ * The prompt names it in prose and the validator checks the plan selected it,
+ * so both have to mean the same package — and it has to be a package the
+ * workspace still has. Deriving the prompt from this constant is what keeps a
+ * deleted part from leaving a test that fails for a reason ("the plan did not
+ * select it") that says nothing about the part being gone.
+ */
+export const AUTHORED_PART = "packages/template-management";
+const AUTHORED_PART_PROSE = "template management library";
+
 function invokedTemplateOperation(code: string, operation: string): boolean {
   if (!code.includes("@workspace-extensions/templates")) return false;
   const quoted = `(["'])${operation}\\1`;
@@ -113,13 +125,12 @@ function templateAuthoringPrepared(result: TestExecutionResult) {
     };
   }
   const selectedReceipts = exactReceipts.filter(([, receipt]) =>
-    receipt.requestedParts.has("packages/template-registry"),
+    receipt.requestedParts.has(AUTHORED_PART),
   );
   if (!selectedReceipts.length) {
     return {
       passed: false,
-      reason:
-        "Authoring plan did not select the requested template registry library",
+      reason: `Authoring plan did not select the requested ${AUTHORED_PART}`,
     };
   }
   const final = findLastAgentMessage(result);
@@ -137,12 +148,13 @@ function templateAuthoringPrepared(result: TestExecutionResult) {
 export const templateTests: TestCase[] = [
   {
     name: "templates-authoring-prepare",
-    description:
-      "Prepare a self-contained upstream snapshot from the local template registry library",
+    description: `Prepare a self-contained upstream snapshot from the local ${AUTHORED_PART_PROSE}`,
     category: "templates",
     validation: "agent-evidence",
     prompt:
-      "Prepare a reusable workspace snapshot containing the template registry library. Show me what source and required dependencies it would include, with an exact plan I can review. Do not publish anything.",
+      `Prepare a reusable workspace snapshot containing the ${AUTHORED_PART_PROSE} ` +
+      `(${AUTHORED_PART}). Show me what source and required dependencies it would include, ` +
+      "with an exact plan I can review. Do not publish anything.",
     validate: templateAuthoringPrepared,
   },
 ];

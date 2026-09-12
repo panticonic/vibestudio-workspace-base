@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TestExecutionResult } from "../types.js";
-import { templateTests } from "./templates.js";
+import { readFileSync } from "node:fs";
+import { AUTHORED_PART, templateTests } from "./templates.js";
 
 function execution(
   returnValue: unknown,
@@ -44,6 +45,18 @@ function execution(
 }
 
 describe("template agentic validator", () => {
+  it("names a workspace part that actually exists", () => {
+    // The prompt asks the agent to snapshot this part and the validator checks
+    // the plan selected it. When the part is deleted from the workspace, the
+    // scenario fails as "the plan did not select it" — which reads like agent
+    // behaviour and says nothing about the part being gone. That is how the
+    // retired template registry left this test failing for days.
+    const manifest = JSON.parse(
+      readFileSync(new URL(`../../../${AUTHORED_PART}/package.json`, import.meta.url), "utf8"),
+    ) as { name?: string };
+    expect(manifest.name).toBeTruthy();
+  });
+
   it("keeps only the flows the product still has", () => {
     // Catalog discovery was removed from the templates extension, so a test
     // orchestrating a call to it asserted a capability that no longer exists.
@@ -59,12 +72,12 @@ describe("template agentic validator", () => {
       test.validate(
         execution(
           {
-            available: [{ repoPath: "packages/template-registry" }],
+            available: [{ repoPath: AUTHORED_PART }],
             plan: {
               mainEventId: "event:main",
               fingerprint,
-              requestedParts: ["packages/template-registry"],
-              includedParts: ["packages/template-registry", "packages/shared"],
+              requestedParts: [AUTHORED_PART],
+              includedParts: [AUTHORED_PART, "packages/shared"],
               requiredParts: ["packages/shared"],
               manifest: "systemEpoch: 0\n",
             },
@@ -73,7 +86,7 @@ describe("template agentic validator", () => {
           {
             code: [
               "const available = await extensions.invoke('@workspace-extensions/templates', 'authoringParts', []);",
-              "const plan = await extensions.invoke('@workspace-extensions/templates', 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['packages/template-registry'] }]);",
+              `const plan = await extensions.invoke('@workspace-extensions/templates', 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['${AUTHORED_PART}'] }]);`,
               "return { available, plan };",
             ].join("\n"),
           },
@@ -89,8 +102,8 @@ describe("template agentic validator", () => {
     const fingerprint = `v1-sha256:${"b".repeat(64)}`;
     const plan = {
       fingerprint,
-      selectedParts: ["packages/template-registry"],
-      includedParts: ["packages/template-registry"],
+      selectedParts: [AUTHORED_PART],
+      includedParts: [AUTHORED_PART],
       requiredParts: [],
       manifest: "systemEpoch: 0\n",
     };
@@ -103,7 +116,7 @@ describe("template agentic validator", () => {
             code: [
               "const templates = '@workspace-extensions/templates';",
               "const available = await rpc.call('main', 'extensions.invoke', [templates, 'authoringParts', []]);",
-              "const plan = await rpc.call('main', 'extensions.invoke', [templates, 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['packages/template-registry'] }]]);",
+              `const plan = await rpc.call('main', 'extensions.invoke', [templates, 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['${AUTHORED_PART}'] }]]);`,
               "console.log(JSON.stringify(plan));",
             ].join("\n"),
             console: JSON.stringify(plan),
@@ -123,15 +136,15 @@ describe("template agentic validator", () => {
           {
             mainEventId: "event:main",
             fingerprint: `v1-sha256:${"a".repeat(64)}`,
-            requestedParts: ["packages/template-registry"],
-            includedParts: ["packages/template-registry"],
+            requestedParts: [AUTHORED_PART],
+            includedParts: [AUTHORED_PART],
             manifest: "systemEpoch: 0\n",
           },
           "Published.",
           {
             code: [
               "await extensions.invoke('@workspace-extensions/templates', 'authoringParts', []);",
-              "const plan = await extensions.invoke('@workspace-extensions/templates', 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['packages/template-registry'] }]);",
+              `const plan = await extensions.invoke('@workspace-extensions/templates', 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['${AUTHORED_PART}'] }]);`,
               "await extensions.invoke('@workspace-extensions/templates', 'publishAuthoring', [{ plan }]);",
               "return plan;",
             ].join("\n"),
@@ -150,8 +163,8 @@ describe("template agentic validator", () => {
     const exactPlan = (fingerprint: string) => ({
       mainEventId: "event:main",
       fingerprint,
-      requestedParts: ["packages/template-registry"],
-      includedParts: ["packages/template-registry"],
+      requestedParts: [AUTHORED_PART],
+      includedParts: [AUTHORED_PART],
       requiredParts: [],
       manifest: "systemEpoch: 0\n",
     });
@@ -166,8 +179,8 @@ describe("template agentic validator", () => {
             code: [
               "const templates = '@workspace-extensions/templates';",
               "await extensions.invoke(templates, 'authoringParts', []);",
-              "await extensions.invoke(templates, 'inspectAuthoring', [{ name: 'Draft', description: 'First draft', parts: ['packages/template-registry'] }]);",
-              "return await extensions.invoke(templates, 'inspectAuthoring', [{ name: 'Final', description: 'Final draft', parts: ['packages/template-registry'] }]);",
+              `await extensions.invoke(templates, 'inspectAuthoring', [{ name: 'Draft', description: 'First draft', parts: ['${AUTHORED_PART}'] }]);`,
+              `return await extensions.invoke(templates, 'inspectAuthoring', [{ name: 'Final', description: 'Final draft', parts: ['${AUTHORED_PART}'] }]);`,
             ].join("\n"),
           },
         ),
@@ -186,8 +199,8 @@ describe("template agentic validator", () => {
           {
             summary: {
               fingerprint,
-              requestedParts: ["packages/template-registry"],
-              includedParts: ["packages/template-registry"],
+              requestedParts: [AUTHORED_PART],
+              includedParts: [AUTHORED_PART],
             },
             plan: {
               fingerprint,
@@ -202,7 +215,7 @@ describe("template agentic validator", () => {
             code: [
               "const templates = '@workspace-extensions/templates';",
               "await extensions.invoke(templates, 'authoringParts', []);",
-              "return await extensions.invoke(templates, 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['packages/template-registry'] }]);",
+              `return await extensions.invoke(templates, 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['${AUTHORED_PART}'] }]);`,
             ].join("\n"),
           },
         ),
