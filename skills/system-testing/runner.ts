@@ -365,6 +365,42 @@ export class HeadlessRunner {
     );
   }
 
+  /**
+   * Record that a turn actually fell back, from the journaled model-execution
+   * evidence that already proves which model ran.
+   *
+   * Without this the policy reports the configured route and an empty
+   * activation list no matter what happened, so "inspect the run to confirm
+   * whether the fallback also failed" cannot be answered from the run record —
+   * the only trace is a per-test diagnostic string. `activeModel` deliberately
+   * stays as configured: which model the next session requests is the host's
+   * per-turn decision, and rewriting it here would make the harness start
+   * asking for the fallback directly.
+   */
+  recordModelFallbackActivations(
+    session: HeadlessSession,
+    testName: string | null,
+    activations: readonly Omit<ModelPolicyActivation, "testName">[],
+  ): void {
+    const sessionPolicy = this.shared.sessionPolicies.get(session);
+    const same = (left: ModelPolicyActivation, right: ModelPolicyActivation): boolean =>
+      left.at === right.at &&
+      left.toModel === right.toModel &&
+      left.testName === right.testName;
+    for (const observed of activations) {
+      const activation: ModelPolicyActivation = { ...observed, testName };
+      // Evidence is captured once per phase, so the same turn is seen again on
+      // a later read; a run's activation list is the set of transitions, not
+      // how many times they were observed.
+      for (const policy of [sessionPolicy, this.shared.modelPolicy]) {
+        if (!policy) continue;
+        if (!policy.activations.some((existing) => same(existing, activation))) {
+          policy.activations.push(activation);
+        }
+      }
+    }
+  }
+
   /** Serializable evidence for inspect/status output. */
   modelPolicySnapshot(session?: HeadlessSession): Readonly<ModelPolicyState> {
     const policy =

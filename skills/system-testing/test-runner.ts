@@ -825,6 +825,33 @@ export class TestRunner {
             `expected each turn to use primary-only calls or ${policy.primaryModel} calls ending in failure followed only by ${fallbackModel}`,
         );
       }
+      // The transition check already knows which turns fell back; report them
+      // so the run record answers what happened, rather than only refusing a
+      // transition that should not have.
+      if (fallbackModel && typeof this.runner.recordModelFallbackActivations === "function") {
+        const observed = [...callsByTurn.values()].flatMap((turnCalls) => {
+          const refs = turnCalls.map((call) => String(call?.["ref"] ?? ""));
+          const fallbackIndex = refs.indexOf(fallbackModel);
+          if (fallbackIndex <= 0) return [];
+          const failedPrimary = turnCalls[fallbackIndex - 1];
+          const fallbackCall = turnCalls[fallbackIndex];
+          return [
+            {
+              at: String(
+                fallbackCall?.["startedAt"] ?? failedPrimary?.["completedAt"] ?? "",
+              ),
+              fromModel: policy.primaryModel,
+              toModel: fallbackModel,
+              failureCode: String(
+                failedPrimary?.["error"] ?? configuredFallbackTrigger(policy) ?? "unknown",
+              ),
+            },
+          ];
+        });
+        if (observed.length > 0) {
+          this.runner.recordModelFallbackActivations(session, testName, observed);
+        }
+      }
     }
     const metered = calls.some((call) => {
       const usage = asRecord(call?.["usage"]);
@@ -851,6 +878,19 @@ export class TestRunner {
     }
     return evidence;
   }
+}
+
+/**
+ * The configured trigger, used only when a failed call carries no error text.
+ * The policy declares this as a list, but a caller-supplied policy view may
+ * carry the single trigger as a string — indexing that would yield a letter.
+ */
+function configuredFallbackTrigger(policy: {
+  fallbackOn?: readonly string[] | string | null;
+}): string | null {
+  const configured = policy.fallbackOn;
+  if (Array.isArray(configured)) return configured[0] ?? null;
+  return typeof configured === "string" ? configured : null;
 }
 
 function recordCleanupFailure(

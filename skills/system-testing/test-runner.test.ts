@@ -1407,9 +1407,11 @@ describe("TestRunner", () => {
           api: "openai-codex-responses",
           auth: "url-bound",
           outcome: "failed",
+          error: "usage limit reached",
         },
         {
           messageId: "m:t:chat-fallback:first:agent:2",
+          startedAt: "2026-09-12T00:00:02.000Z",
           ref: fallbackModel,
           provider: "openai-codex",
           model: "gpt-5.6-luna",
@@ -1429,6 +1431,7 @@ describe("TestRunner", () => {
         },
         {
           messageId: "m:t:chat-fallback:followup:agent:1",
+          startedAt: "2026-09-12T00:00:04.000Z",
           ref: fallbackModel,
           provider: "openai-codex",
           model: "gpt-5.6-luna",
@@ -1456,8 +1459,19 @@ describe("TestRunner", () => {
       })),
       close: vi.fn(async () => undefined),
     };
+    const recordModelFallbackActivations = vi.fn(
+      (_session: unknown, testName: string | null, activations: unknown) => {
+        void testName;
+        void activations;
+      },
+    );
     const runner = {
       modelRef: fallbackModel,
+      recordModelFallbackActivations: (
+        session: unknown,
+        testName: string | null,
+        activations: unknown,
+      ) => recordModelFallbackActivations(session, testName, activations),
       modelPolicySnapshot: () => ({
         primaryModel: TEST_MODEL,
         activeModel: TEST_MODEL,
@@ -1481,6 +1495,23 @@ describe("TestRunner", () => {
 
     expect(result.passed).toBe(true);
     expect(execution.modelExecutionEvidence).toEqual(evidence);
+    // The run record has to say a fallback happened. Its only other trace is a
+    // per-test diagnostic string, which cannot answer "did the fallback also
+    // fail?" from the run.
+    expect(recordModelFallbackActivations).toHaveBeenCalledWith(session, "fallback-test", [
+      {
+        at: "2026-09-12T00:00:02.000Z",
+        fromModel: TEST_MODEL,
+        toModel: fallbackModel,
+        failureCode: "usage limit reached",
+      },
+      {
+        at: "2026-09-12T00:00:04.000Z",
+        fromModel: TEST_MODEL,
+        toModel: fallbackModel,
+        failureCode: "usage_limit_terminal",
+      },
+    ]);
   });
 });
 

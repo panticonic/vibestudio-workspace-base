@@ -90,6 +90,31 @@ describe("HeadlessRunner", () => {
     mocks.messageListeners.length = 0;
   });
 
+  it("reports an observed fallback on the run policy without rerouting new sessions", async () => {
+    const runner = new HeadlessRunner("ctx-test");
+    const session = await runner.spawn();
+    const activation = {
+      at: "2026-09-12T00:00:02.000Z",
+      fromModel: SYSTEM_TEST_AGENT_MODEL,
+      toModel: SYSTEM_TEST_USAGE_LIMIT_FALLBACK_MODEL,
+      failureCode: "usage limit reached",
+    };
+
+    runner.recordModelFallbackActivations(session, "fallback-test", [activation]);
+    // Evidence is re-read per phase, so the same turn arrives twice; a run's
+    // activations are the set of transitions, not the number of observations.
+    runner.recordModelFallbackActivations(session, "fallback-test", [activation]);
+
+    const runPolicy = runner.modelPolicySnapshot();
+    expect(runPolicy.activations).toEqual([{ ...activation, testName: "fallback-test" }]);
+    expect(runner.modelPolicySnapshot(session).activations).toEqual([
+      { ...activation, testName: "fallback-test" },
+    ]);
+    // Which model the next session asks for stays the host's per-turn call.
+    expect(runPolicy.activeModel).toBe(SYSTEM_TEST_AGENT_MODEL);
+    expect(runner.modelRef).toBe(SYSTEM_TEST_AGENT_MODEL);
+  });
+
   it("spawns bounded system-test agents in isolated contexts", async () => {
     const runner = new HeadlessRunner("ctx-test", {
       model: "anthropic:test-model",
