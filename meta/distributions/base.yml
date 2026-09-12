@@ -15,6 +15,7 @@ template:
     - extensions/test-runner
     - panels/chat
     - panels/terminal
+    - packages/svelte
     - projects/default
     - skills/agentic-development
     - skills/agents
@@ -31,6 +32,8 @@ template:
     - skills/vibestudio-vcs
     - skills/web-research
     - skills/workspace-dev
+    - templates/svelte
+    - templates/vanilla
     - workers/agent-worker
     - workers/missions
     - workers/model-settings
