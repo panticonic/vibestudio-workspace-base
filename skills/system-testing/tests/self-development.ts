@@ -418,10 +418,16 @@ async function orchestrate(
   };
 }
 
+/**
+ * An isolated-host recipe is reviewed for exactly one client decision, and the
+ * run asserts the two agree, so the kind alone does not identify the recipe a
+ * scenario needs.
+ */
 async function repositoryAndRecipe(
   context: TestOrchestrationContext,
   receipt: SelfDevelopmentReceipt,
-  targetKind: "build-only" | "client-device" | "isolated-host"
+  targetKind: "build-only" | "client-device" | "isolated-host",
+  includeClient?: boolean
 ) {
   const repository = await context.runner.resolveSelfDevelopmentRepository();
   operation(receipt, "vcs", "resolveRepository", repository);
@@ -429,9 +435,15 @@ async function repositoryAndRecipe(
   operation(receipt, "vcs", "resolveRepository", baseRepository);
   const recipes = await context.runner.callSelfDevelopment<Record<string, unknown>[]>("listRecipes");
   operation(receipt, "development", "listRecipes", recipes);
-  const recipe = recipes.find((candidate) => object(candidate["target"])?.["kind"] === targetKind);
+  const recipe = recipes.find((candidate) => {
+    const target = object(candidate["target"]);
+    if (target?.["kind"] !== targetKind) return false;
+    return includeClient === undefined || target["includeClient"] === includeClient;
+  });
   if (!recipe || typeof recipe["recipeId"] !== "string") {
-    unavailable(receipt, `no reviewed ${targetKind} recipe is provisioned`);
+    const wanted =
+      includeClient === undefined ? targetKind : `${targetKind} (includeClient=${includeClient})`;
+    unavailable(receipt, `no reviewed ${wanted} recipe is provisioned`);
     return null;
   }
   return { repository, baseRepository, recipe };
@@ -585,7 +597,7 @@ async function isolatedHost(
   includeClient = false
 ) {
   return orchestrate(scenario, context, async (receipt) => {
-    const setup = await repositoryAndRecipe(context, receipt, "isolated-host");
+    const setup = await repositoryAndRecipe(context, receipt, "isolated-host", includeClient);
     if (!setup) return;
     const executor = includeClient ? await selectClientExecutor(context, receipt) : null;
     if (includeClient && !executor) return;
