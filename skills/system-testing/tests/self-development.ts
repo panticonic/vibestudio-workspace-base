@@ -707,7 +707,8 @@ async function nativeCheckpoint(context: TestOrchestrationContext) {
     try {
       await context.runner.callSelfDevelopment("writeNativeTerminal", {
         sessionId,
-        writeId: `system-test-native-write-${crypto.randomUUID()}`,
+        // Interactive input is idempotent per ordinal, not per generated id.
+        sequence: 1,
         data: "Create a new file named .vibestudio-system-test/native-checkpoint.txt containing exactly native checkpoint probe, then stop and wait. Do not commit or publish it.\n"
       });
       operation(receipt, "development", "writeNativeTerminal", {
