@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { DurableObjectBase, schemaRpc, type DurableObjectContext } from "@workspace/runtime/worker/kernel";
-import { vcs } from "@workspace/runtime";
 import {
   developmentBuiltinMethods,
   developmentRunSchema,
@@ -14,7 +13,6 @@ import type {
   nativeDevelopmentTerminalSnapshotSchema,
   preparedNativeBuildSchema
 } from "@vibestudio/service-schemas/developmentNative";
-import type { VcsInspectResult, VcsStatusResult } from "@vibestudio/service-schemas/vcs";
 import { canonicalJson } from "@vibestudio/content-addressing";
 import type { z } from "zod";
 import { DevelopmentStore, developmentSessionId } from "./DevelopmentStore.js";
@@ -865,7 +863,7 @@ export class DevelopmentDO extends DurableObjectBase {
   }
 
   /**
-   * Read the adopted repository through the reviewed public VCS surface.
+   * Read the adopted repository through the reviewed public VCS service.
    *
    * These two reads used to address the workspace-source Durable Object
    * directly, which no userland receiver may do: that object admits the code
@@ -874,6 +872,11 @@ export class DevelopmentDO extends DurableObjectBase {
    * not satisfied" before it could decide whether the repository was adopted.
    * The session's semantic writes already go through the host adapter; only
    * the reads had been left on the direct path.
+   *
+   * The public `vcs` service cannot serve it either: it authorizes reads
+   * against the caller's own reachable context graph, and the context being
+   * read belongs to the session's owner, not to this object. So the host
+   * performs the read and returns only the repository's presence and path.
    */
   private async resolveRepository(
     contextId: string,
@@ -882,19 +885,16 @@ export class DevelopmentDO extends DurableObjectBase {
     repoPath: string;
     sourceState: DevelopmentSession["basis"]["parentWorkingHead"];
   } | null> {
-    const status: VcsStatusResult = await vcs.status({ contextId });
     try {
-      const inspected: VcsInspectResult = await vcs.inspect({
-        node: { kind: "repository", state: status.workingHead, repositoryId },
-        edgeLimit: 1
-      });
-      if (inspected.node.kind !== "repository" || inspected.node.value.kind !== "present") {
-        return null;
-      }
-      return {
-        repoPath: inspected.node.value.repoPath,
-        sourceState: status.workingHead
-      };
+      const resolved = await this.rpc.call<{
+        repoPath: string;
+        workingHead: DevelopmentSession["basis"]["parentWorkingHead"];
+      } | null>("main", "developmentNative.resolveAdoptedRepository", [
+        { contextId, repositoryId }
+      ]);
+      return resolved
+        ? { repoPath: resolved.repoPath, sourceState: resolved.workingHead }
+        : null;
     } catch (error) {
       if (
         typeof error === "object" &&
