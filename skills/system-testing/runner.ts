@@ -1156,6 +1156,7 @@ export class HeadlessRunner {
       | "retry"
       | "checkpoint"
       | "inspectNative"
+      | "readNativeTerminal"
       | "writeNativeTerminal"
       | "stopNativeTool"
       | "closeSession",
