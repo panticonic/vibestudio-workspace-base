@@ -739,6 +739,13 @@ async function nativeCheckpoint(context: TestOrchestrationContext) {
       }
       operation(receipt, "development", "inspectNative", inspected);
       if (object(inspected?.["native"])?.["pendingChanges"] !== "present") {
+        // What the tool printed is the only evidence of why it did not act.
+        // Without it the timeout is indistinguishable from a tool that never
+        // started, one still thinking, and one that answered and refused.
+        const terminal = await context.runner
+          .callSelfDevelopment("readNativeTerminal", { sessionId, maxBytes: 8192 })
+          .catch((error: unknown) => ({ unreadable: String(error) }));
+        operation(receipt, "development", "readNativeTerminal", terminal);
         throw new Error("Native tool did not produce the requested semantic change");
       }
       const checkpointed = await context.runner.callSelfDevelopment("checkpoint", {
