@@ -1339,6 +1339,9 @@ function buildableExtensionFiles(repoName: string): Array<{ path: string; conten
               activationEvents: ["onInvoke"],
               methodAuthority: { status: { effect: { kind: "open" } } },
             },
+            // Same reason as the app fixture: the repair scenario is asked to
+            // keep a focused unit test aligned and granted native execution.
+            tests: [{ name: "unit", runtime: "native", include: ["**/*.test.ts"] }],
             authority: { requests: [], provides: [] },
           },
           devDependencies: { vitest: "^3.2.4" },
@@ -1389,6 +1392,11 @@ function buildableAppFiles(repoName: string): Array<{ path: string; content: str
             displayName: `System Test ${repoName}`,
             icon: "./assets/icon.svg",
             app: { target: "terminal", entry: "index.ts" },
+            // The scenario that repairs this unit is asked to keep its focused
+            // unit test aligned, and is granted native test execution to do it.
+            // Without a declared suite the build refuses to run the test file
+            // this fixture ships beside its vitest dependency.
+            tests: [{ name: "unit", runtime: "native", include: ["**/*.test.ts"] }],
             authority: {
               requests: [
                 {
