@@ -1,4 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+
+// The development worker reads semantic state through the reviewed public VCS
+// surface. Addressing the workspace-source Durable Object directly is refused
+// for every userland receiver, so the route itself is what these tests pin.
+const publicVcs = vi.hoisted(() => ({ status: vi.fn(), inspect: vi.fn() }));
+vi.mock("@workspace/runtime", () => ({ vcs: publicVcs }));
 import { DURABLE_OBJECT_FRAMEWORK_RPC_METHODS } from "@vibestudio/durable";
 import { createTestDO } from "@vibestudio/durable/test-utils";
 import { rpcExposedMethodNames } from "@vibestudio/rpc";
@@ -57,8 +63,10 @@ describe("DevelopmentDO", () => {
     );
   });
 
-  it("supplies host-attested semantic ingress when resolving session repositories", async () => {
+  it("resolves session repositories through the reviewed public VCS surface", async () => {
     const { instance, callAs } = await development();
+    publicVcs.status.mockReset();
+    publicVcs.inspect.mockReset();
     const parentHead = { kind: "event" as const, eventId: "event:parent" };
     const childHead = { kind: "event" as const, eventId: "event:child" };
     const workspaceSource =
@@ -67,9 +75,6 @@ describe("DevelopmentDO", () => {
       async (target: string, method: string, args: unknown[]) => {
         if (target === "main" && method === "runtime.resolveContext")
           return "context:parent";
-        if (target === "main" && method === "workers.resolveService") {
-          return { kind: "durable-object", targetId: workspaceSource };
-        }
         if (target === "main" && method === "runtime.forkSemanticContext") {
           expect(args).toEqual([
             {
@@ -83,29 +88,6 @@ describe("DevelopmentDO", () => {
             parentContextId: "context:parent",
             parentWorkingHead: parentHead,
             childBaseState: childHead,
-          };
-        }
-        if (target === workspaceSource && method === "vcsStatus") {
-          const request = args[0] as { input: { contextId: string } };
-          return {
-            kind: "complete",
-            result: {
-              workingHead:
-                request.input.contextId === "context:parent"
-                  ? parentHead
-                  : childHead,
-            },
-          };
-        }
-        if (target === workspaceSource && method === "vcsInspect") {
-          return {
-            kind: "complete",
-            result: {
-              node: {
-                kind: "repository",
-                value: { kind: "present", repoPath: "projects/vibestudio" },
-              },
-            },
           };
         }
         if (
@@ -160,6 +142,16 @@ describe("DevelopmentDO", () => {
       configurable: true,
     });
 
+    publicVcs.status.mockImplementation(async ({ contextId }: { contextId: string }) => ({
+      workingHead: contextId === "context:parent" ? parentHead : childHead,
+    }));
+    publicVcs.inspect.mockResolvedValue({
+      node: {
+        kind: "repository",
+        value: { kind: "present", repoPath: "projects/vibestudio" },
+      },
+    });
+
     const opened = await callAs(
       { callerId: "panel:development", callerKind: "panel", userId: "alice" },
       "openSession",
@@ -180,22 +172,23 @@ describe("DevelopmentDO", () => {
         },
       },
     });
-    const semanticCalls = rpcCall.mock.calls.filter(
-      ([target, method]) =>
-        target === workspaceSource && String(method).startsWith("vcs"),
-    );
-    expect(semanticCalls).toHaveLength(4);
-    for (const [, , args] of semanticCalls) {
-      expect(args).toEqual([
-        expect.objectContaining({
-          input: expect.any(Object),
-          ingress: {
-            causalParent: null,
-            contextIntegrity: { class: "internal", externalKeys: [] },
-          },
-        }),
-      ]);
-    }
+    // Both the parent context and the forked child are read, and neither read
+    // addresses the workspace-source object itself.
+    expect(publicVcs.status.mock.calls.map(([input]) => input)).toEqual([
+      { contextId: "context:parent" },
+      { contextId: "context:child" },
+    ]);
+    expect(publicVcs.inspect).toHaveBeenCalledWith({
+      node: {
+        kind: "repository",
+        state: parentHead,
+        repositoryId: "repository:vibestudio",
+      },
+      edgeLimit: 1,
+    });
+    expect(
+      rpcCall.mock.calls.filter(([target]) => target === workspaceSource),
+    ).toEqual([]);
     const sessionId = (
       opened as { kind: "opened"; session: { sessionId: string } }
     ).session.sessionId;

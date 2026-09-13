@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { DurableObjectBase, schemaRpc, type DurableObjectContext } from "@workspace/runtime/worker/kernel";
+import { vcs } from "@workspace/runtime";
 import {
   developmentBuiltinMethods,
   developmentRunSchema,
@@ -23,7 +24,6 @@ type NativeReceipt = z.infer<typeof nativeDevelopmentSessionReceiptSchema>;
 type TerminalSnapshot = z.infer<typeof nativeDevelopmentTerminalSnapshotSchema>;
 type PreparedBuild = z.infer<typeof preparedNativeBuildSchema>;
 
-const WORKSPACE_SOURCE_PROTOCOL = "vibestudio.workspace-source.v1";
 const TERMINAL_RUN_STATES = new Set<DevelopmentRun["state"]>(["succeeded", "stopped", "failed", "cancelled"]);
 
 export class DevelopmentDO extends DurableObjectBase {
@@ -864,6 +864,17 @@ export class DevelopmentDO extends DurableObjectBase {
     });
   }
 
+  /**
+   * Read the adopted repository through the reviewed public VCS surface.
+   *
+   * These two reads used to address the workspace-source Durable Object
+   * directly, which no userland receiver may do: that object admits the code
+   * principal only when its repository path is `vibestudio/internal`, so every
+   * open of a development session was refused with "relationship code-source
+   * not satisfied" before it could decide whether the repository was adopted.
+   * The session's semantic writes already go through the host adapter; only
+   * the reads had been left on the direct path.
+   */
   private async resolveRepository(
     contextId: string,
     repositoryId: string
@@ -871,12 +882,9 @@ export class DevelopmentDO extends DurableObjectBase {
     repoPath: string;
     sourceState: DevelopmentSession["basis"]["parentWorkingHead"];
   } | null> {
-    const workspaceSource = await this.resolveWorkspaceSource();
-    const status = await this.callSemanticRead<VcsStatusResult>(workspaceSource, "vcsStatus", {
-      contextId
-    });
+    const status: VcsStatusResult = await vcs.status({ contextId });
     try {
-      const inspected = await this.callSemanticRead<VcsInspectResult>(workspaceSource, "vcsInspect", {
+      const inspected: VcsInspectResult = await vcs.inspect({
         node: { kind: "repository", state: status.workingHead, repositoryId },
         edgeLimit: 1
       });
@@ -898,53 +906,6 @@ export class DevelopmentDO extends DurableObjectBase {
       }
       throw error;
     }
-  }
-
-  private async callSemanticRead<T>(
-    workspaceSource: string,
-    method: "vcsStatus" | "vcsInspect",
-    input: unknown
-  ): Promise<T> {
-    const outcome = await this.rpc.call<
-      | { kind: "complete"; result: T }
-      | { kind: "effects-pending"; effects: readonly unknown[] }
-      | { kind: "host-read"; request: unknown }
-    >(workspaceSource, method, [this.semanticRequest(input)]);
-    if (outcome.kind !== "complete") {
-      throw coded("ESEMANTICREAD", `Development ${method} unexpectedly required ${outcome.kind}`);
-    }
-    return outcome.result;
-  }
-
-  private semanticRequest(input: unknown) {
-    const integrity = this.authorization?.contextIntegrity;
-    if (!integrity) {
-      throw coded("EACCES", "Development semantic reads require host-attested context integrity");
-    }
-    return {
-      input,
-      ingress: {
-        causalParent: null,
-        contextIntegrity:
-          integrity.class === "external"
-            ? {
-                class: "external" as const,
-                externalKeys: [...integrity.externalKeys]
-              }
-            : { class: "internal" as const, externalKeys: [] }
-      }
-    };
-  }
-
-  private async resolveWorkspaceSource(): Promise<string> {
-    const resolved = await this.rpc.call<{
-      kind: "durable-object" | "worker";
-      targetId?: string;
-    }>("main", "workers.resolveService", [WORKSPACE_SOURCE_PROTOCOL]);
-    if (resolved.kind !== "durable-object" || !resolved.targetId) {
-      throw new Error(`Workspace protocol ${WORKSPACE_SOURCE_PROTOCOL} must resolve to a Durable Object`);
-    }
-    return resolved.targetId;
   }
 
   private async retireSessionEffects(session: DevelopmentSession): Promise<DevelopmentSession> {
