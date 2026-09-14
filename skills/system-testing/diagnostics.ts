@@ -147,6 +147,15 @@ export interface FailureDiagnostic {
     counteractedChangeCount: number;
   } | null;
   channelDeliveryLatency: ChannelDeliveryLatencySummary | null;
+  /**
+   * Whatever an orchestrated scenario recorded for itself.
+   *
+   * An orchestrator's validator often grades harness-collected evidence rather
+   * than the trajectory — grant snapshots, phase coordinates, probe readings.
+   * Dropping that from the failure report leaves the one reason the test
+   * failed the only thing a reader cannot see.
+   */
+  orchestration: Record<string, string> | null;
   participants: Array<{
     id: string;
     name?: string;
@@ -269,6 +278,7 @@ function summarizeFailure(
     cleanupFailures: entryExecution["cleanupFailures"] ?? [],
     workspaceRepoFixture: summarizeWorkspaceRepoFixture(entryExecution["diagnostics"]),
     channelDeliveryLatency,
+    orchestration: summarizeOrchestrationDiagnostics(entryExecution["diagnostics"], limits),
     participants,
     likelyIssue: entry.result.passed
       ? unexpectedToolFailures.length > 0
@@ -282,6 +292,25 @@ function summarizeFailure(
           channelDeliveryLatency?.violations ?? []
         ),
   };
+}
+
+/** Keys with their own dedicated summary above; everything else is carried. */
+const SUMMARIZED_DIAGNOSTIC_KEYS = new Set([
+  "workspaceRepoFixture",
+  "channelDeliveryLatency",
+]);
+
+function summarizeOrchestrationDiagnostics(
+  diagnostics: TestSuiteResultEntry["execution"]["diagnostics"],
+  limits: DiagnosticLimits,
+): FailureDiagnostic["orchestration"] {
+  if (!diagnostics) return null;
+  const carried: Record<string, string> = {};
+  for (const [key, value] of Object.entries(diagnostics)) {
+    if (SUMMARIZED_DIAGNOSTIC_KEYS.has(key) || value === undefined) continue;
+    carried[key] = clip(safeJson(value), limits.text);
+  }
+  return Object.keys(carried).length > 0 ? carried : null;
 }
 
 function summarizeWorkspaceRepoFixture(

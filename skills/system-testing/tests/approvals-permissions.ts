@@ -237,7 +237,10 @@ async function orchestrateSubagentTaskGrantReuse(
     );
     await context.sendAndWait(
       session,
-      "Call permissions.list() once. Return only entries whose resource is exactly server-logs.read and whose callerLabel is This task. Do not change permissions.",
+      // "Return only entries" invited a projection, and the grant's duration —
+      // the one field that proves the task-scoped reuse this measures — was
+      // the field an agent dropped. Ask for the rows the surface returned.
+      "Call permissions.list() once. Return, unchanged and with every field intact, only those entries whose resource is exactly server-logs.read and whose callerLabel is This task. Do not reshape or summarize the entries, and do not change permissions.",
       "final permission inventory"
     );
   } catch (cause) {

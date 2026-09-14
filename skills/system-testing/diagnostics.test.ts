@@ -399,6 +399,26 @@ describe("system-testing diagnostics", () => {
     expect(summarizeEntry(entryWithMessages([])).channelDeliveryLatency).toBeNull();
   });
 
+  it("carries an orchestrated scenario's own evidence into the failure report", () => {
+    const entry = entryWithMessages([]);
+    entry.execution.diagnostics = {
+      chatTaskRuleReuse: {
+        afterFirstTurn: [{ id: "rule-1" }],
+        afterSecondTurn: [{ id: "rule-2" }],
+      },
+      // Keys with a dedicated projection are not repeated here.
+      workspaceRepoFixture: { testName: "fixture-test" },
+    };
+
+    const orchestration = summarizeEntry(entry).orchestration;
+    expect(Object.keys(orchestration ?? {})).toEqual(["chatTaskRuleReuse"]);
+    expect(orchestration?.["chatTaskRuleReuse"]).toContain("rule-2");
+  });
+
+  it("omits the orchestration projection when a scenario recorded nothing", () => {
+    expect(summarizeEntry(entryWithMessages([])).orchestration).toBeNull();
+  });
+
   it("includes bounded workspace repo fixture teardown diagnostics", () => {
     const entry = entryWithMessages([]);
     entry.execution.diagnostics = {
