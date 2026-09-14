@@ -44,7 +44,11 @@ export const mobileTests: TestCase[] = [
           },
           resource: {
             kind: "exact",
-            key: "phone:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
+            // The worker declares resourceType "mobile-device" for both userland
+            // capabilities, so that — not "phone" — is the prompt's resource
+            // prefix. A rule keyed to "phone:" matched no prompt this surface
+            // raises, and the scenario failed on its own subject.
+            key: "mobile-device:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
           },
           tier: "gated",
           decision: "once",
@@ -57,7 +61,7 @@ export const mobileTests: TestCase[] = [
           },
           resource: {
             kind: "exact",
-            key: "phone:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
+            key: "mobile-device:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
           },
           tier: "gated",
           decision: "once",

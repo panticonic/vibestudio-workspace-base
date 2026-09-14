@@ -46,6 +46,21 @@ export const PANEL_CONTEXT_BOUNDARY_AUTHORITY: AgentExecutionTestAuthorityRule =
   decision: "once",
 };
 
+/**
+ * The CDP boundary leaf selects its tier at prepare time from gated|critical,
+ * and a case rule matches one exact tier, so a rule pinned to `critical` alone
+ * leaves the gated selection to fall into a waiter no unattended run can
+ * answer. Carry both selections rather than guessing which one a given panel
+ * path will take.
+ */
+export const PANEL_CONTEXT_BOUNDARY_GATED_AUTHORITY: AgentExecutionTestAuthorityRule = {
+  ruleId: "manage-panel-context-boundary-gated",
+  capability: { kind: "exact", key: "context.boundary" },
+  resource: { kind: "prefix", prefix: "context/" },
+  tier: "gated",
+  decision: "once",
+};
+
 /** Workspace-panel CDP is performed by the installed testkit driver DO. */
 export const PANEL_TESTKIT_DRIVER_AUTHORITY: AgentExecutionTestAuthorityRule = {
   ruleId: "use-testkit-driver",
@@ -75,11 +90,16 @@ export function panelControlAuthorityPolicy(
     authority: [
       PANEL_RUNTIME_STATE_AUTHORITY,
       PANEL_CONTEXT_BOUNDARY_AUTHORITY,
+      PANEL_CONTEXT_BOUNDARY_GATED_AUTHORITY,
       PANEL_TESTKIT_DRIVER_AUTHORITY,
       {
         ruleId: inspectionRuleId,
         capability: { kind: "exact", key: "panel.inspect" },
-        resource: { kind: "exact", key: "panel.inspect" },
+        // The resource is the panel the call names, not the capability: the
+        // receiver binds `panel.inspect` to its first argument. A rule keyed
+        // to the capability name matched no prompt this surface can raise, and
+        // the panel a test mints at runtime has no id to spell ahead of time.
+        resource: { kind: "prefix", prefix: "panel:" },
         tier: "gated",
         decision: "once",
       },
