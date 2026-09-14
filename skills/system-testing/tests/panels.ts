@@ -18,8 +18,14 @@ const BROWSER_PANEL_PROMPT =
 const PANEL_TREE_NAVIGATION_PROMPT =
   "I lost track of that browser view in the panel tree. Compare https://example.com/ with https://example.org/ there, then tell me where the investigation lived and which destination it ended on.";
 
-const BROWSER_IMPORT_PROMPT =
-  "Check the Browser Import inspector that is already open and tell me its exact panel identity, source, and lifecycle phase once it is usable.";
+// Panels ship per distribution, and the runner lives in System: the Browser
+// Import inspector this once named is a Personal unit, so the seeded goal could
+// never resolve its source here. Workspace History is the System-resident
+// first-party panel with the same shape -- pre-existing, non-chat, and doing
+// real asynchronous work before it is usable.
+const FIRST_PARTY_PANEL_SOURCE = "about/workspace-history";
+const FIRST_PARTY_PANEL_PROMPT =
+  "Check the Workspace History panel that is already open and tell me its exact panel identity, source, and lifecycle phase once it is usable.";
 
 function validateSeededPanelNavigation(
   result: Parameters<TestCase["validate"]>[0],
@@ -43,13 +49,13 @@ function validateSeededPanelNavigation(
       };
 }
 
-function validateSeededBrowserImportPanel(
+function validateSeededFirstPartyPanel(
   result: Parameters<TestCase["validate"]>[0],
 ) {
   const evidence = result.diagnostics?.["seededPanelGoal"] as
     | Partial<SeededPanelGoalEvidence>
     | undefined;
-  return evidence?.finalSource === "about/browser-import-inspector" &&
+  return evidence?.finalSource === FIRST_PARTY_PANEL_SOURCE &&
     evidence.finalPhase === "ready" &&
     evidence.targetPreserved === true &&
     evidence.reachedExpectedDestination === true &&
@@ -58,7 +64,7 @@ function validateSeededBrowserImportPanel(
     : {
         passed: false,
         reason:
-          "The harness did not observe the seeded Browser Import panel remain ready at its exact source",
+          "The harness did not observe the seeded first-party panel remain ready at its exact source",
       };
 }
 
@@ -126,24 +132,24 @@ export const panelTests: TestCase[] = [
     validate: validateAgentCompletionReport,
   },
   {
-    name: "browser-import-panel-lifecycle",
+    name: "first-party-panel-lifecycle",
     description:
-      "Inspect the first-party Browser Import panel through its real lifecycle",
+      "Inspect a pre-existing first-party panel through its real lifecycle",
     category: "panels",
     validation: "agent-evidence",
     authorityPolicy: panelControlAuthorityPolicy(
-      "inspect-browser-import-panel",
+      "inspect-first-party-panel",
     ),
     resources: [PANEL_AUTOMATION_RESOURCE],
-    prompt: BROWSER_IMPORT_PROMPT,
+    prompt: FIRST_PARTY_PANEL_PROMPT,
     orchestrate: (context) =>
       orchestrateSeededPanelGoal(
         context,
-        BROWSER_IMPORT_PROMPT,
-        "inspect the Browser Import lifecycle",
-        "about/browser-import-inspector",
-        { finalSource: "about/browser-import-inspector", finalPhase: "ready" },
+        FIRST_PARTY_PANEL_PROMPT,
+        "inspect the first-party panel lifecycle",
+        FIRST_PARTY_PANEL_SOURCE,
+        { finalSource: FIRST_PARTY_PANEL_SOURCE, finalPhase: "ready" },
       ),
-    validate: validateSeededBrowserImportPanel,
+    validate: validateSeededFirstPartyPanel,
   },
 ];

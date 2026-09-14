@@ -22,7 +22,7 @@ export const FALLBACK_MODEL = {
   hfRepo: "LiquidAI/LFM2.5-2.6B-GGUF",
   quant: "Q4_K_M" as QuantName,
   file: "LFM2.5-2.6B-Q4_K_M.gguf",
-  sha256: "79fdf00351b46cf26f020aead28d01889886be87c55fa0eb907e6f9b00bfee14",
+  sha256: "02a8b7e17487d326e46d68ce0ba24211e1b80a14c4cd0597fa73c1cd697f52ed",
   downloadSizeBytes: CATALOG_FALLBACK_MODEL.downloadSizeBytes,
   contextLength: CATALOG_FALLBACK_MODEL.contextWindow,
 } as const;

@@ -120,29 +120,29 @@ describe("panel system-test declarations", () => {
     ).toMatchObject({ passed: false });
   });
 
-  it("seeds Browser Import and requires independent ready-phase evidence", () => {
-    const browserImport = panelTests.find(
-      (test) => test.name === "browser-import-panel-lifecycle",
+  it("seeds a first-party panel and requires independent ready-phase evidence", () => {
+    const firstParty = panelTests.find(
+      (test) => test.name === "first-party-panel-lifecycle",
     )!;
     const evidence = {
-      panelId: "seeded-browser-import",
-      finalSource: "about/browser-import-inspector",
+      panelId: "seeded-first-party",
+      finalSource: "about/workspace-history",
       finalPhase: "ready",
-      finalPathIds: ["seeded-browser-import"],
+      finalPathIds: ["seeded-first-party"],
       targetPreserved: true,
       reachedExpectedDestination: true,
     };
 
-    expect(browserImport.validation).toBe("agent-evidence");
+    expect(firstParty.validation).toBe("agent-evidence");
     expect(
-      browserImport.validate({
+      firstParty.validate({
         messages: [],
         duration: 1,
         diagnostics: { seededPanelGoal: evidence },
       }),
     ).toEqual({ passed: true, reason: undefined });
     expect(
-      browserImport.validate({
+      firstParty.validate({
         messages: [],
         duration: 1,
         diagnostics: {
