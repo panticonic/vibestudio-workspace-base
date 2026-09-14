@@ -399,6 +399,32 @@ describe("system-testing diagnostics", () => {
     expect(summarizeEntry(entryWithMessages([])).channelDeliveryLatency).toBeNull();
   });
 
+  it("keeps both ends of a long tool error so the diagnosis survives", () => {
+    const entry = entryWithMessages([]);
+    // The real shape: a shared preamble, a long absolute path, then the one
+    // part that differs between two build failures.
+    const error =
+      "[tool.verify:execute] unknown_tool_failure: [build.getTestArtifact] Build failed with 1 error:\n" +
+      "/tmp/vibestudio-selfdev/workspaces/system-ws/state/build-sources/".padEnd(600, "x") +
+      "/index.tsx:12:4: ERROR: Could not resolve \"./missing-module\"";
+    entry.execution.toolFailures = [
+      { id: "call-1", name: "verify", status: "error", error, source: "message" },
+    ] as never;
+
+    const [summary] = summarizeEntry(entry).toolFailures;
+    expect(summary?.error).toContain("Build failed with 1 error");
+    expect(summary?.error).toContain('Could not resolve "./missing-module"');
+    expect(summary?.error).toMatch(/chars elided/u);
+  });
+
+  it("leaves a tool error shorter than the limit untouched", () => {
+    const entry = entryWithMessages([]);
+    entry.execution.toolFailures = [
+      { id: "call-1", name: "verify", status: "error", error: "short", source: "message" },
+    ] as never;
+    expect(summarizeEntry(entry).toolFailures[0]?.error).toBe("short");
+  });
+
   it("carries an orchestrated scenario's own evidence into the failure report", () => {
     const entry = entryWithMessages([]);
     entry.execution.diagnostics = {

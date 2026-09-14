@@ -270,7 +270,7 @@ function summarizeFailure(
       .slice(-limits.invocations)
       .map((failure) => ({
         ...failure,
-        ...(failure.error ? { error: clip(failure.error, limits.text) } : {}),
+        ...(failure.error ? { error: windowText(failure.error, limits.text) } : {}),
       })),
     trajectoryReview: entryExecution["trajectoryReview"] ?? null,
     debugEvents,
@@ -666,6 +666,22 @@ function safeJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/**
+ * Keep both ends of an error, because a head-clip drops the diagnosis.
+ *
+ * Tool errors lead with a preamble and an absolute path — "Build failed with 1
+ * error:" plus a hundred characters of workspace path — and say which file and
+ * what went wrong only after that. Clipping the head kept the sentence every
+ * build failure shares and threw away the one part that differed.
+ */
+function windowText(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  const head = Math.floor(limit * 0.45);
+  const tail = limit - head;
+  const elided = value.length - limit;
+  return `${value.slice(0, head)}… [${elided} chars elided] …${value.slice(value.length - tail)}`;
 }
 
 function clip(value: string, limit: number): string {
