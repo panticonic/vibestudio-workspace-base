@@ -397,19 +397,28 @@ export class TestRunner {
           ),
         };
       };
+      // An orchestrator does more than take agent turns: it spawns sessions,
+      // drives panels, and waits on the harness. Only the turns carried the
+      // test deadline, so anything else that failed to settle ran forever —
+      // one cdp scenario held a run in `orchestration` for five and a half
+      // hours. `timeoutMs` bounds the test, not just its turns.
       const execution = test.orchestrate
-        ? await test.orchestrate({
-            runner: testRunner,
-            remainingTimeMs,
-            sendAndWait: async (targetSession, prompt, phase) => {
-              const completed = await sendAndCapture(
-                targetSession,
-                prompt,
-                phase,
-              );
-              return completed.response;
-            },
-          })
+        ? await this.withTimeout(
+            test.orchestrate({
+              runner: testRunner,
+              remainingTimeMs,
+              sendAndWait: async (targetSession, prompt, phase) => {
+                const completed = await sendAndCapture(
+                  targetSession,
+                  prompt,
+                  phase,
+                );
+                return completed.response;
+              },
+            }),
+            remainingTimeMs(),
+            `Timed out running test "${test.name}": its orchestration did not settle within ${testTimeoutMs}ms`,
+          )
         : await (async (): Promise<TestExecutionResult> => {
             session = await testRunner.spawn();
             enterPhase("agent-turn");

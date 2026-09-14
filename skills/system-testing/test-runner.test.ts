@@ -873,6 +873,31 @@ describe("TestRunner", () => {
     );
   });
 
+  it("fails an orchestration that never settles instead of running forever", async () => {
+    const runner = {
+      modelRef: TEST_MODEL,
+      spawn: vi.fn(async () => {
+        throw new Error("the stuck orchestration never gets this far");
+      }),
+      collectDiagnostics: vi.fn(async () => ({})),
+    } as unknown as HeadlessRunner;
+    const tester = new TestRunner(runner, { testTimeoutMs: 20 });
+
+    const { result } = await tester.runOne({
+      name: "wedged-orchestration",
+      category: "test",
+      description: "an orchestrator that blocks somewhere other than a turn",
+      prompt: "unused",
+      // Blocking outside sendAndWait is the case the per-turn deadline missed.
+      orchestrate: () => new Promise(() => undefined),
+      validation: "harness" as const,
+      validate: () => ({ passed: true }),
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.reason).toMatch(/did not settle within 20ms/u);
+  });
+
   it("gates a natural agent completion on independent outcome evidence", async () => {
     const messages = [
       {
