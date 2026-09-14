@@ -441,6 +441,22 @@ describe("system-testing diagnostics", () => {
     expect(orchestration?.["chatTaskRuleReuse"]).toContain("rule-2");
   });
 
+  it("keeps the tail of a long orchestration record, where the verdict often sits", () => {
+    const entry = entryWithMessages([]);
+    entry.execution.diagnostics = {
+      scheduledNotification: {
+        runs: Array.from({ length: 40 }, (_, index) => ({ runId: `run-${index}`.padEnd(40, "x") })),
+        // The field the validator actually grades, last in the record.
+        notifications: [{ id: "notify-1" }, { id: "notify-2" }],
+      },
+    };
+
+    const carried = summarizeEntry(entry).orchestration?.["scheduledNotification"] ?? "";
+    expect(carried).toContain("runs");
+    expect(carried).toContain("notify-2");
+    expect(carried).toMatch(/chars elided/u);
+  });
+
   it("omits the orchestration projection when a scenario recorded nothing", () => {
     expect(summarizeEntry(entryWithMessages([])).orchestration).toBeNull();
   });

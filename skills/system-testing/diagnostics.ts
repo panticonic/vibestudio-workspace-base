@@ -308,7 +308,12 @@ function summarizeOrchestrationDiagnostics(
   const carried: Record<string, string> = {};
   for (const [key, value] of Object.entries(diagnostics)) {
     if (SUMMARIZED_DIAGNOSTIC_KEYS.has(key) || value === undefined) continue;
-    carried[key] = clip(safeJson(value), limits.text);
+    // Windowed, not head-clipped, for the same reason a tool error is: this is
+    // structured evidence a validator graded on, and the field that explains a
+    // verdict is as likely to sit at the end as the start. A scheduled-
+    // automation record lost its `notifications` array to a head clip while
+    // keeping the `runs` that were never in question.
+    carried[key] = windowText(safeJson(value), limits.text);
   }
   return Object.keys(carried).length > 0 ? carried : null;
 }
