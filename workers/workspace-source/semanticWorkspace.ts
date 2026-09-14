@@ -5267,7 +5267,13 @@ export class SemanticWorkspace {
    * "query-reachable" and "walk-reachable" are the same predicate by
    * construction rather than by two implementations agreeing.
    */
-  private materializeVisibilityBasis(contextIds: readonly string[]): void {
+  /**
+   * Public because the memory recall index is a second content-entry surface
+   * over the same trajectory messages. It joins the basis this fills, so the
+   * parity invariant — what a walk cannot reach, a query and a search must not
+   * return either — holds across both surfaces from one implementation.
+   */
+  materializeVisibilityBasis(contextIds: readonly string[]): void {
     this.deps.sql.exec(`DELETE FROM prov_vis_events`);
     this.deps.sql.exec(`DELETE FROM prov_vis_applications`);
     this.deps.sql.exec(`DELETE FROM prov_vis_commands`);
