@@ -7,6 +7,7 @@
     "title": "System Test Runner",
     "icon": "./assets/icon.svg",
     "kind": "worker",
+    "agentVisible": false,
     "entry": "index.ts",
     "durable": {
       "classes": [
