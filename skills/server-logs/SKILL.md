@@ -23,7 +23,22 @@ const warnings = await services.serverLog.query({
   sinceSeq: snapshot.latestSeq,
   limit: 100,
 });
-return { snapshot, warnings };
+// Return the snapshot's identity and the records that carry the finding, not
+// the buffers themselves. A whole tail of full records is tens of thousands of
+// characters and comes back windowed into `scope.$lastLargeReturn`, which
+// leaves the identity you were told to preserve out of your own answer.
+const brief = (record) => ({
+  seq: record.seq,
+  level: record.level,
+  tag: record.tag,
+  message: record.message,
+});
+return {
+  serverBootId: snapshot.serverBootId,
+  latestSeq: snapshot.latestSeq,
+  records: snapshot.records.slice(-10).map(brief),
+  warnings: warnings.records.slice(-10).map(brief),
+};
 ```
 
 Use `stats()` to discover active subsystem tags before filtering. Compose level,
