@@ -215,6 +215,17 @@ export class DevelopmentDO extends DurableObjectBase {
       disposition: "retain-context"
     });
     if (closing.state === "closed") return closing;
+    const cleanup = await this.reclaimSessionRunRoots(session.sessionId);
+    if (cleanup.length > 0) {
+      const diagnostics = cleanup.map((message) => toDiagnostic(new Error(message)));
+      return this.store.updateSession(session.sessionId, {
+        state: "requires-repair",
+        contextEffect: "retained",
+        primaryDiagnostic: diagnostics[0]!,
+        cleanupDiagnostics: diagnostics,
+        repairAttention: "actionable"
+      });
+    }
     return this.store.updateSession(session.sessionId, {
       state: "closed",
       contextEffect: "retained",
@@ -908,8 +919,47 @@ export class DevelopmentDO extends DurableObjectBase {
     }
   }
 
+  /**
+   * Give back every finished run's build root when its session ends.
+   *
+   * A run root holds the run's own source, base, toolchain, pnpm store, and
+   * isolated instance — gigabytes per run — and `developmentNative.retireBuild`
+   * is the only thing that removes it. Leaving that to an explicit agent call
+   * meant a run that merely finished, or timed out, kept its tree and (for an
+   * isolated host) its server process for as long as the workspace lived.
+   *
+   * A session that is closing already has no active run, so every remaining
+   * run is terminal and its root is nothing but reclaimable disk. Report a
+   * failure as a cleanup diagnostic rather than refusing the close: an
+   * unreclaimed root is a disk problem, not a reason to keep the session open.
+   */
+  private async reclaimSessionRunRoots(sessionId: string): Promise<string[]> {
+    const cleanup: string[] = [];
+    for (const run of this.store.listRuns({ sessionId })) {
+      if (!TERMINAL_RUN_STATES.has(run.state)) continue;
+      if (run.artifact === null && run.state === "cancelled") continue;
+      try {
+        await this.rpc.call("main", "developmentNative.retireBuild", [{ run }]);
+        this.store.transitionRun({
+          runId: run.runId,
+          expected: [run.state],
+          state: run.state,
+          artifact: null,
+          terminal: true,
+          message: "Exact native build root reclaimed when its session closed"
+        });
+      } catch (error) {
+        cleanup.push(
+          `run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+    return cleanup;
+  }
+
   private async retireSessionEffects(session: DevelopmentSession): Promise<DevelopmentSession> {
     const cleanup: string[] = [];
+    cleanup.push(...(await this.reclaimSessionRunRoots(session.sessionId)));
     if (session.mode === "native-tool") {
       const retired = await this.rpc.call<{
         retired: boolean;
