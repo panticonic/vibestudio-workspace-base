@@ -558,7 +558,7 @@ const CANONICAL_QUESTION_CASES: TestCase[] = [
     workspaceRepoFixture: PROVENANCE_RECORD_WORKSPACE_REPO_FIXTURE,
     validation: "agent-evidence",
     prompt:
-      "Give me an inventory of the recorded work in the disposable project: every distinct piece of work so far, what each one was for, and how many files each touched. I want the whole set in one view, not a tour of it.",
+      "Give me an inventory of the recorded work in the disposable project: every distinct piece of work so far, what each one was for, and which files each touched. I want the whole set in one view, not a tour of it.",
     validate: (result) =>
       all(
         provenanceSurfacesAreLive(result),
