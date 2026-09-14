@@ -239,15 +239,26 @@ function namedAtLeast(
   result: TestExecutionResult,
   candidates: readonly RegExp[],
   atLeast: number,
+  /**
+   * A second axis the same set can be named on.
+   *
+   * A question that asks for "every distinct piece of work, what each was for,
+   * and how many files each touched" is answered by naming the work, not the
+   * coordinates — and pushing the reader toward coordinates sends it to the
+   * relational views, whose id columns `identityHygieneHolds` then refuses.
+   * Reaching the whole set is the capability; which axis names it is not.
+   */
+  alternative: readonly RegExp[] = [],
 ): TestResult {
   const final = findLastAgentMessage(result);
-  const named = candidates.filter((candidate) => candidate.test(final)).length;
-  return named >= atLeast
-    ? { passed: true }
-    : {
-        passed: false,
-        reason: `The answer named ${named} of the ${candidates.length} recorded coordinates; the question asks for the set, not a sample`,
-      };
+  const count = (axis: readonly RegExp[]): number =>
+    axis.filter((candidate) => candidate.test(final)).length;
+  const named = count(candidates);
+  if (named >= atLeast || count(alternative) >= atLeast) return { passed: true };
+  return {
+    passed: false,
+    reason: `The answer named ${named} of the ${candidates.length} recorded coordinates; the question asks for the set, not a sample`,
+  };
 }
 
 /** An inventory that never says how much there is has not inventoried. */
@@ -558,7 +569,7 @@ const CANONICAL_QUESTION_CASES: TestCase[] = [
     workspaceRepoFixture: PROVENANCE_RECORD_WORKSPACE_REPO_FIXTURE,
     validation: "agent-evidence",
     prompt:
-      "Give me an inventory of the recorded work in the disposable project: every distinct piece of work so far, what each one was for, and which files each touched. I want the whole set in one view, not a tour of it.",
+      "Give me an inventory of the recorded work in the disposable project: every distinct piece of work so far, what each one was for, and how many files each touched. I want the whole set in one view, not a tour of it.",
     validate: (result) =>
       all(
         provenanceSurfacesAreLive(result),
@@ -571,6 +582,8 @@ const CANONICAL_QUESTION_CASES: TestCase[] = [
             /cache-policy/iu,
           ],
           2,
+          // The same four pieces of work, named by what each one was for.
+          [/retry|backoff/iu, /socket|ping/iu, /upload|chunk/iu, /cache|feed/iu],
         ),
         reportedTheSize(result, /\b(?:4|four|5|five)\b/iu),
         identityHygieneHolds(result),
