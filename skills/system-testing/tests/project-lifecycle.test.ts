@@ -349,6 +349,13 @@ describe("project lifecycle prompts", () => {
           decision: "once",
         },
         {
+          ruleId: "manage-panel-context-boundary-gated",
+          capability: { kind: "exact", key: "context.boundary" },
+          resource: { kind: "prefix", prefix: "context/" },
+          tier: "gated",
+          decision: "once",
+        },
+        {
           ruleId: "use-testkit-driver",
           capability: { kind: "exact", key: "workspace-service:testkit-driver" },
           resource: {
@@ -361,7 +368,7 @@ describe("project lifecycle prompts", () => {
         {
           ruleId: "inspect-task-management-panel",
           capability: { kind: "exact", key: "panel.inspect" },
-          resource: { kind: "exact", key: "panel.inspect" },
+          resource: { kind: "prefix", prefix: "panel:" },
           tier: "gated",
           decision: "once",
         },
@@ -561,6 +568,13 @@ describe("project lifecycle prompts", () => {
           decision: "once",
         },
         {
+          ruleId: "manage-panel-context-boundary-gated",
+          capability: { kind: "exact", key: "context.boundary" },
+          resource: { kind: "prefix", prefix: "context/" },
+          tier: "gated",
+          decision: "once",
+        },
+        {
           ruleId: "use-testkit-driver",
           capability: { kind: "exact", key: "workspace-service:testkit-driver" },
           resource: {
@@ -573,7 +587,7 @@ describe("project lifecycle prompts", () => {
         {
           ruleId: "inspect-created-panel",
           capability: { kind: "exact", key: "panel.inspect" },
-          resource: { kind: "exact", key: "panel.inspect" },
+          resource: { kind: "prefix", prefix: "panel:" },
           tier: "gated",
           decision: "once",
         },

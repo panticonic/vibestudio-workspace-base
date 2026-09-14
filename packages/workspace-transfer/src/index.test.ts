@@ -163,7 +163,6 @@ async function workspace(workspaceId: string) {
         input: parsed,
         ingress: {
           causalParent: null,
-          contextIntegrity: { class: "internal", externalKeys: [] },
         },
       }),
     );

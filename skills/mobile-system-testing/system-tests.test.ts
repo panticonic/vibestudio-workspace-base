@@ -95,7 +95,7 @@ describe("mobile system-test declarations", () => {
           },
           resource: {
             kind: "exact",
-            key: "phone:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
+            key: "mobile-device:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
           },
         }),
         expect.objectContaining({
@@ -105,7 +105,7 @@ describe("mobile system-test declarations", () => {
           },
           resource: {
             kind: "exact",
-            key: "phone:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
+            key: "mobile-device:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
           },
         }),
       ]),

@@ -24,6 +24,13 @@ describe("panel system-test declarations", () => {
           decision: "once",
         },
         {
+          ruleId: "manage-panel-context-boundary-gated",
+          capability: { kind: "exact", key: "context.boundary" },
+          resource: { kind: "prefix", prefix: "context/" },
+          tier: "gated",
+          decision: "once",
+        },
+        {
           ruleId: "use-testkit-driver",
           capability: {
             kind: "exact",
@@ -39,7 +46,7 @@ describe("panel system-test declarations", () => {
         {
           ruleId: "inspect-created-panel",
           capability: { kind: "exact", key: "panel.inspect" },
-          resource: { kind: "exact", key: "panel.inspect" },
+          resource: { kind: "prefix", prefix: "panel:" },
           tier: "gated",
           decision: "once",
         },

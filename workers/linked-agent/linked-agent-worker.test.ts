@@ -61,9 +61,6 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
           integrating: [],
         };
       }
-      if (target === "main" && method === "contextIntegrity.ingest") {
-        return { class: "internal", latchEpoch: 0, externalKeys: [] };
-      }
       if (target === "main" && method.startsWith("workspace-state.alarm"))
         return undefined;
       throw new Error(`unexpected rpc ${target}.${method}`);

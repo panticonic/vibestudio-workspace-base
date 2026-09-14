@@ -1022,7 +1022,9 @@ describe("TestRunner", () => {
         timeout.mock.calls
           .map((call) => call[1])
           .filter((delay): delay is number => typeof delay === "number"),
-      ).toEqual([1_000, 750]);
+        // The orchestration itself is bounded by the same budget its turns
+        // draw from: one outer deadline, then each turn's remainder.
+      ).toEqual([1_000, 1_000, 750]);
     } finally {
       dateNow.mockRestore();
       timeout.mockRestore();

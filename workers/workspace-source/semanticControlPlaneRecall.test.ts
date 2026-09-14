@@ -179,7 +179,10 @@ describe("GadWorkspaceDO — recall visibility", () => {
   };
 
   beforeEach(async () => {
-    gad = await createTestDO(GadWorkspaceDO, { __objectKey: "gad-recall-visibility" });
+    gad = await createTestDO(GadWorkspaceDO, {
+      __objectKey: "gad-recall-visibility",
+      WORKSPACE_ID: "workspace-recall",
+    });
     doi = gad.instance;
     for (const channelId of [OWN_CHANNEL, OTHER_CHANNEL]) {
       reach(doi).indexMemoryRow({

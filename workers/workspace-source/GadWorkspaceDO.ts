@@ -31,7 +31,6 @@ import type {
   DeleteChannelMembershipInput,
   PutChannelMembershipInput,
 } from "@vibestudio/shared/channelInvites";
-import { parseLineageKey } from "@vibestudio/shared/authority/contextIntegrity";
 import {
   channelEnvelopePageInfo,
   normalizeChannelEnvelopePageRequest,
@@ -1561,7 +1560,6 @@ export class GadWorkspaceDO extends DurableObjectBase {
           },
           {
             causalParent: null,
-            contextIntegrity: { class: "internal", externalKeys: [] },
           },
         );
         if (ensured.kind !== "complete") {
@@ -1638,7 +1636,6 @@ export class GadWorkspaceDO extends DurableObjectBase {
           },
           {
             causalParent: null,
-            contextIntegrity: { class: "internal", externalKeys: [] },
           },
         );
         if (dispatched.kind === "host-read") {
@@ -1697,7 +1694,6 @@ export class GadWorkspaceDO extends DurableObjectBase {
           },
           ingress: {
             causalParent: null,
-            contextIntegrity: { class: "internal", externalKeys: [] },
           },
         });
         if (dispatched.kind === "host-read") {
@@ -4869,15 +4865,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
       // exact owning channel object, never from arbitrary workspace code.
       this.channelContentIntegrity(annotations);
     } else {
-      delete annotations["contentClass"];
-      delete annotations["externalKeys"];
-      const fact = this.authorization?.contextIntegrity;
-      annotations["contentClass"] =
-        fact?.class === "external" ? "external" : "internal";
-      annotations["externalKeys"] =
-        fact?.class === "external"
-          ? [...new Set(fact.externalKeys.map(String))]
-          : [];
+      // Workspace code cannot self-declare outside lineage; only the owning
+      // channel object stamps it.
+      annotations["contentClass"] = "internal";
+      annotations["externalKeys"] = [];
     }
     return { ...event, annotations };
   }
@@ -4898,7 +4889,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         "Channel append requires a valid host-attested content class",
       );
     }
-    const externalKeys = keys.map((key) => parseLineageKey(key));
+    const externalKeys = keys.map((key) => String(key));
     return { contentClass, externalKeys: [...new Set(externalKeys)] };
   }
 
@@ -5153,13 +5144,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
     if (input.metadata !== undefined) annotations["metadata"] = input.metadata;
     if (input.attachments !== undefined)
       annotations["attachments"] = input.attachments;
-    const fact = this.authorization?.contextIntegrity;
-    annotations["contentClass"] =
-      fact?.class === "external" ? "external" : "internal";
-    annotations["externalKeys"] =
-      fact?.class === "external"
-        ? [...new Set(fact.externalKeys.map(String))]
-        : [];
+    annotations["contentClass"] = "internal";
+    annotations["externalKeys"] = [];
     return {
       envelopeId: input.envelopeId ?? null,
       actor: input.from,

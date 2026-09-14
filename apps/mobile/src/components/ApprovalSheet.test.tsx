@@ -62,7 +62,6 @@ const consequentialCapability: PendingApproval = {
     missionSubject: "-",
     snippetDigest: "snippet:news",
     codeLineage: { class: "internal", chain: ["code:news"] },
-    contextLineage: null,
     initiatorChain: ["user:alice"],
     at: 1,
   },
