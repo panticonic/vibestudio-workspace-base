@@ -1210,7 +1210,18 @@ export const projectLifecycleTests: TestCase[] = [
     description: "Fork and open a panel project",
     category: "project-lifecycle",
     workspaceRepoFixture: BUILDABLE_PANEL_WITH_DERIVED_WORKSPACE_REPO_FIXTURE,
-    authorityPolicy: panelControlAuthorityPolicy("inspect-forked-project-panel"),
+    authorityPolicy: panelControlAuthorityPolicy("inspect-forked-project-panel", [
+      // Forking is the capability under test, so the case policy has to carry
+      // it: without the grant the fork prompts, the unattended harness has no
+      // approver, and the scenario fails on its own subject.
+      {
+        ruleId: "fork-panel-semantic-context",
+        capability: { kind: "exact", key: "context.semantic.fork" },
+        resource: { kind: "prefix", prefix: "" },
+        tier: "gated",
+        decision: "once",
+      },
+    ]),
     resources: [PANEL_AUTOMATION_RESOURCE],
     prompt: "Fork the existing panel into a new isolated panel and open the result.",
     validate: validatePanelFork,

@@ -188,6 +188,32 @@ describe("automation native launch system test validator", () => {
     ).toEqual({ passed: true });
   });
 
+  it("accepts the numeric spelling of the same Thursday schedule", () => {
+    expect(
+      automationLaunchTest.validate(
+        execution(
+          "",
+          { ...launch, trigger: { ...launch.trigger, expression: "5 5 * * 4" } },
+          "Daily project pulse is running; use its automation pill to inspect or stop it.",
+          "launch_automation",
+        ),
+      ),
+    ).toEqual({ passed: true });
+  });
+
+  it("still rejects a schedule that is not the requested one", () => {
+    expect(
+      automationLaunchTest.validate(
+        execution(
+          "",
+          { ...launch, trigger: { ...launch.trigger, expression: "5 5 * * 3" } },
+          "Daily project pulse is running; use its automation pill to inspect or stop it.",
+          "launch_automation",
+        ),
+      ),
+    ).toMatchObject({ passed: false });
+  });
+
   it("rejects routing creation through eval", () => {
     expect(
       automationLaunchTest.validate(

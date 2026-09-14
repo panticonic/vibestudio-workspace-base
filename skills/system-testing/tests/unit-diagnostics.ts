@@ -622,7 +622,10 @@ function isDailyProjectPulseLaunch(value: unknown): boolean {
   return (
     record["name"] === "Daily project pulse" &&
     trigger?.["kind"] === "cron" &&
-    trigger["expression"] === "5 5 * * THU" &&
+    // Thursday has two canonical cron spellings and the platform accepts
+    // both. Grading one of them grades transcription, not whether the agent
+    // scheduled the automation the request asked for.
+    /^5\s+5\s+\*\s+\*\s+(?:4|THU)$/iu.test(String(trigger["expression"] ?? "")) &&
     trigger["timezone"] === "America/New_York" &&
     trigger["untilAt"] === Date.UTC(2027, 0, 1, 5) &&
     trigger["maxRuns"] === 12 &&
